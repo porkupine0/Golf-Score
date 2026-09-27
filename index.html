@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Card Golf Scorecard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&family=Barlow+Condensed:wght@600;700&family=Figtree:wght@400;600;700&display=swap">
+<style>
+:root{
+  --bg:#eef1ea; --surface:#fffefa; --surface-2:#e4eadf; --ink:#13231a; --muted:#5d6b61; --line:#cfd8cc;
+  --green:#0d5c3b; --green-deep:#083f29; --on-green:#fffefa; --yellow:#f3c233;
+  --under:#c41a2b; --over:#0d5c3b; --lead:#fdf6dc; --lead-line:#d9a916; --err:#b3261e; --err-bg:#fdeceb;
+  --shadow:0 1px 2px rgba(19,35,26,.06),0 6px 18px rgba(19,35,26,.07);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:#0b1510; --surface:#122019; --surface-2:#1a2c22; --ink:#eef3ec; --muted:#9bab9f; --line:#294033;
+  --green:#1f7a50; --green-deep:#0f4a31; --on-green:#fffefa; --yellow:#f3c94a;
+  --under:#ff6b6b; --over:#6fcf97; --lead:#2b2a14; --lead-line:#f3c94a; --err:#f28b82; --err-bg:#3b1e1c;
+  --shadow:none;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0b1510; --surface:#122019; --surface-2:#1a2c22; --ink:#eef3ec; --muted:#9bab9f; --line:#294033;
+  --green:#1f7a50; --green-deep:#0f4a31; --on-green:#fffefa; --yellow:#f3c94a;
+  --under:#ff6b6b; --over:#6fcf97; --lead:#2b2a14; --lead-line:#f3c94a; --err:#f28b82; --err-bg:#3b1e1c;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 "Figtree",system-ui,sans-serif;padding-inline:16px;padding-block:18px 48px}
+.wrap{max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1,h2{font-family:"Libre Caslon Text",Georgia,serif;margin:0;text-wrap:balance;font-weight:700}
+h1{font-size:30px;color:var(--green)}
+h2{font-size:20px}
+.cond{font-family:"Barlow Condensed","Figtree",sans-serif;letter-spacing:.02em}
+.num{font-variant-numeric:tabular-nums}
+.brand{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.sub{font-family:"Barlow Condensed",sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:.12em;font-size:13px;color:var(--muted)}
+.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--shadow)}
+button,select{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:10px 14px;font-weight:600}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--yellow);outline-offset:2px}
+.primary{background:var(--green);color:var(--on-green);border-color:var(--green);font-size:17px;padding:14px}
+.ghost{background:transparent}
+.small{padding:6px 10px;font-size:14px}
+.danger{color:var(--err);border-color:var(--err)}
+.row{display:flex;align-items:center;gap:10px}
+.grow{flex:1;min-width:0}
+input[type=text],select{font:inherit;width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.hint{font-size:14px;color:var(--muted);margin:0}
+.stepper{display:flex;align-items:center;gap:14px}
+.stepper button{width:46px;height:46px;font-size:22px;padding:0}
+.stepper .count{font-family:"Barlow Condensed",sans-serif;font-size:40px;font-weight:700;min-width:40px;text-align:center}
+.names{display:flex;flex-direction:column;gap:8px}
+.under{color:var(--under)} .over{color:var(--over)}
+
+/* next hole strip */
+.tee{display:grid;grid-template-columns:auto 1fr;gap:2px 16px;align-items:center;padding:14px 16px;border-radius:14px;background:var(--green);color:var(--on-green)}
+.tee .hn{grid-row:1 / 3;font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:48px;line-height:1;color:var(--yellow)}
+.tee .hname{font-family:"Libre Caslon Text",Georgia,serif;font-style:italic;font-size:19px}
+.tee .hmeta{font-size:14px;opacity:.92}
+.tee b{color:var(--yellow)}
+
+/* leaderboard */
+.board{border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow)}
+.boardhead{background:var(--green-deep);color:var(--on-green);padding:12px 16px;display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.boardhead .t{font-family:"Libre Caslon Text",Georgia,serif;font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:17px;color:var(--yellow)}
+.boardhead .s{font-family:"Barlow Condensed",sans-serif;font-weight:600;letter-spacing:.1em;text-transform:uppercase;font-size:13px}
+.lrow{display:grid;grid-template-columns:44px 1fr auto;gap:2px 12px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
+.lrow:first-of-type{border-top:0}
+.lrow.lead{background:var(--lead);box-shadow:inset 4px 0 0 var(--lead-line)}
+.pos{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:22px;text-align:center}
+.move{display:block;font-size:12px;font-family:"Figtree",sans-serif;font-weight:700;line-height:1}
+.move.up{color:var(--over)} .move.down{color:var(--under)} .move.same{color:var(--muted)}
+.lname{font-family:"Libre Caslon Text",Georgia,serif;font-weight:700;font-size:18px;text-transform:uppercase;letter-spacing:.04em;overflow-wrap:anywhere}
+.ldet{font-size:13px;color:var(--muted);grid-column:2 / 4}
+.ldet b{color:var(--ink)}
+.topar{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:34px;line-height:1;text-align:right}
+.topar small{display:block;font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.04em;margin-top:2px}
+
+/* entry */
+.erow{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.erow:last-child{border-bottom:0}
+.erow .who{font-weight:700;overflow-wrap:anywhere}
+.erow .who small{display:block;font-weight:400;color:var(--muted);font-size:13px}
+.scorebox{display:flex;align-items:center;gap:4px}
+.scorebox button{width:40px;height:44px;padding:0;font-size:18px}
+.scorebox input{width:70px;text-align:center;font-size:20px;font-weight:700;padding:8px 4px}
+.scorebox button.neg{background:var(--green);color:var(--on-green);border-color:var(--green)}
+.err{background:var(--err-bg);color:var(--err);padding:10px 12px;border-radius:10px;font-weight:600;font-size:14px}
+
+/* scorecard */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.cardhead{padding:12px 16px;display:flex;align-items:baseline;gap:10px;border-bottom:3px double var(--green)}
+.cardhead h2{color:var(--green)}
+.tablewrap{overflow-x:auto}
+table.sc{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-family:"Barlow Condensed",sans-serif;font-size:18px}
+.sc th,.sc td{padding:0;text-align:center;border:1px solid var(--line);min-width:38px;height:42px}
+.sc thead th{background:var(--green);color:var(--on-green);font-weight:700;letter-spacing:.06em;border-color:var(--green-deep)}
+.sc thead tr.par th{background:var(--surface-2);color:var(--ink);font-weight:600}
+.sc th.name,.sc td.name{text-align:left;padding:0 10px;min-width:92px;max-width:120px;position:sticky;left:0;background:var(--surface);z-index:1;font-family:"Figtree",sans-serif;font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc thead th.name{background:var(--green);color:var(--on-green)}
+.sc thead tr.par th.name{background:var(--surface-2);color:var(--ink)}
+.sc .tot{font-weight:700;background:var(--surface-2)}
+.sc .tp{font-size:13px;font-weight:600;min-width:32px}
+.sc thead .tot{background:var(--green-deep)}
+.sc thead tr.par .tot{background:var(--surface-2)}
+.sc td button.cell{width:100%;height:100%;border:0;border-radius:0;background:transparent;padding:0;font:inherit;color:inherit;display:flex;align-items:center;justify-content:center}
+.sc td button.cell:hover{background:var(--surface-2)}
+.mark{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 3px;line-height:1}
+.m-birdie{border:1.5px solid var(--under);border-radius:50%;color:var(--under)}
+.m-eagle{border:1.5px solid var(--under);border-radius:50%;color:var(--under);box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--under)}
+.m-bogey{border:1.5px solid var(--ink)}
+.m-double{border:1.5px solid var(--ink);box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--ink)}
+.m-par{}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);padding:10px 16px;align-items:center}
+.legend .mark{min-width:20px;height:20px;font-size:12px;font-family:"Barlow Condensed",sans-serif;margin-right:8px}
+
+/* game over */
+.jacket{background:var(--green);color:var(--on-green);border-radius:14px;padding:20px;display:grid;grid-template-columns:auto 1fr;gap:6px 18px;align-items:center}
+.jacket svg{grid-row:1 / 4;width:78px;height:auto}
+.jacket .k{font-family:"Barlow Condensed",sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:.14em;font-size:13px;color:var(--yellow)}
+.jacket h2{font-size:25px;color:var(--on-green)}
+.jacket .btnrow{grid-column:1 / 3;margin-top:8px}
+.jacket .btnrow button{background:var(--surface);color:var(--ink);border-color:var(--surface)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.btnrow>*{flex:1}
+.awards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.award{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:2px}
+.award .an{font-family:"Barlow Condensed",sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:14px;color:var(--green)}
+.award .aw{font-family:"Libre Caslon Text",Georgia,serif;font-weight:700;font-size:17px;overflow-wrap:anywhere}
+.award .ad{font-size:13px;color:var(--muted)}
+@media (max-width:380px){.awards{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:no-preference){
+  .jacket svg{animation:drape .9s ease-out both}
+  @keyframes drape{from{transform:translateY(-8px) rotate(-6deg)}to{transform:none}}
+}
+</style>
+<style>body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+
+<div class="wrap" id="app"></div>
+
+<script>
+const KEY = "card-golf-scorecard-v1";
+const HOLES = 9, PAR = 4;
+const HOLE_NAMES = ["Tea Olive","Pink Dogwood","Flowering Peach","Flower Crab Apple","Magnolia","Juniper","Pampas","Yellow Jasmine","Carolina Cherry"];
+
+let state = load() || { phase:"setup", count:4, names:["","","","","","",""], firstDealer:0, players:[], dealer0:0, holes:[] };
+let entry = null; // {editing, raw:[], error, focus}
+let confirmKey = null, confirmTimer = null;
+
+function load(){ try{ const s = localStorage.getItem(KEY); return s ? JSON.parse(s) : null; }catch(e){ return null; } }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const minus = n => n < 0 ? "−" + Math.abs(n) : String(n);
+function toParHtml(n){ return n === 0 ? `<span>E</span>` : n < 0 ? `<span class="under">−${-n}</span>` : `<span class="over">+${n}</span>`; }
+function pname(i){ return (state.names[i]||"").trim() || `Player ${i+1}`; }
+
+function totalsAfter(k){ // totals after first k holes
+  const t = state.players.map(()=>0);
+  state.holes.slice(0,k).forEach(h => h.forEach((v,i)=> t[i] += v));
+  return t;
+}
+function ranks(t){ // golf positions, lowest wins, ties share
+  const r = t.map(v => 1 + t.filter(x => x < v).length);
+  return r.map((p,i) => ({ p, tied: r.filter(x => x === p).length > 1 }));
+}
+const posLabel = r => (r.tied ? "T" : "") + r.p;
+const over = () => state.holes.length >= HOLES;
+const dealerOf = h => (state.dealer0 + h) % state.players.length;
+
+function confirmThen(key, fn){
+  if (confirmKey === key){ clearTimeout(confirmTimer); confirmKey = null; fn(); return; }
+  confirmKey = key; render();
+  clearTimeout(confirmTimer);
+  confirmTimer = setTimeout(()=>{ confirmKey = null; render(); }, 3500);
+}
+
+function render(){
+  const app = document.getElementById("app");
+  const focusId = document.activeElement && document.activeElement.id;
+  app.innerHTML = state.phase === "setup" ? setupView() : playView();
+  if (focusId){ const el = document.getElementById(focusId); if (el) el.focus(); }
+}
+
+function header(extra=""){
+  return `<div class="brand"><div><h1>Card Golf</h1><div class="sub">9 holes · Par 36</div></div>${extra}</div>`;
+}
+
+function setupView(){
+  if (state.firstDealer >= state.count) state.firstDealer = 0;
+  let names = "";
+  for (let i=0;i<state.count;i++){
+    names += `<div class="row"><span class="sub num" style="width:22px">${i+1}</span>
+      <input type="text" id="name-${i}" data-name="${i}" placeholder="Player ${i+1}" value="${esc(state.names[i]||"")}" maxlength="16" autocomplete="off"></div>`;
+  }
+  const opts = Array.from({length:state.count},(_,i)=>`<option value="${i}" ${i===state.firstDealer?"selected":""}>${esc(pname(i))}</option>`).join("");
+  return header() + `
+  <div class="panel">
+    <div class="eyebrow">Players</div>
+    <div class="stepper">
+      <button id="minus" data-act="count" data-d="-1" aria-label="Fewer players" ${state.count<=2?"disabled":""}>−</button>
+      <span class="count num">${state.count}</span>
+      <button id="plus" data-act="count" data-d="1" aria-label="More players" ${state.count>=7?"disabled":""}>+</button>
+      <p class="hint grow">2 to 7 players. List them in seating order, going left.</p>
+    </div>
+    <div class="names">${names}</div>
+    <div class="names">
+      <label class="eyebrow" for="first-dealer">Deals the first hole</label>
+      <select id="first-dealer">${opts}</select>
+    </div>
+    <button class="primary" data-act="start" id="start">Tee off</button>
+  </div>
+  <p class="hint">Enter each player's total for the hole. Lowest total after 9 holes wins the green jacket.</p>`;
+}
+
+function playView(){
+  const n = state.holes.length, done = over();
+  const t = totalsAfter(n), rk = ranks(t);
+  const prev = n > 1 ? ranks(totalsAfter(n-1)) : null;
+  const order = t.map((v,i)=>i).sort((a,b)=> t[a]-t[b] || a-b);
+  const best = Math.min(...t);
+
+  let top = "";
+  if (done){
+    const winners = order.filter(i => t[i] === best);
+    const names = winners.map(i=>esc(state.players[i])).join(" &amp; ");
+    top = `<div class="jacket">
+      ${jacketSvg()}
+      <div class="k">${winners.length>1?"A share of the jacket":"Green jacket"}</div>
+      <h2>${names}</h2>
+      <div class="num">Total ${minus(best)}</div>
+      <div class="btnrow"><button data-act="rematch" id="rematch">Rematch, same players</button><button data-act="newsetup" id="newsetup2">New players</button></div>
+    </div>` + awardsView();
+  }
+
+  const board = `<div class="board">
+    <div class="boardhead"><span class="t">Leaders</span><span class="s">${n===0?"Before the first hole":done?"Final":"Thru "+n}</span></div>
+    ${order.map((i,idx) => {
+      const r = rk[i];
+      let move = "";
+      if (prev){ const d = prev[i].p - r.p; move = d>0?`<span class="move up">▲${d}</span>`:d<0?`<span class="move down">▼${-d}</span>`:`<span class="move same">–</span>`; }
+      let det = [];
+      if (n > 0){
+        det.push(`Avg <b class="num">${(t[i]/n).toFixed(1)}</b>`);
+        if (t[i] === best){
+          const others = t.filter((v,j)=>j!==i && v!==best);
+          const tiedLead = t.filter(v=>v===best).length > 1;
+          if (tiedLead) det.push(`Tied for the lead`);
+          else if (others.length) det.push(`Leads by <b class="num">${Math.min(...others) - best}</b>`);
+        } else {
+          det.push(`<b class="num">${t[i]-best}</b> back of the lead`);
+          const ahead = t.filter(v => v < t[i]);
+          const nearest = Math.max(...ahead);
+          if (nearest !== best){
+            const who = order.find(j => t[j] === nearest);
+            det.push(`<b class="num">${t[i]-nearest}</b> back of ${esc(state.players[who])}`);
+          }
+        }
+      }
+      return `<div class="lrow ${n>0 && t[i]===best?"lead":""}">
+        <div class="pos num">${n>0?posLabel(r):"–"}${move}</div>
+        <div class="lname">${esc(state.players[i])}</div>
+        <div class="topar num">${n>0?minus(t[i]):"0"}<small>${n>0?toParHtml(t[i]-PAR*n)+" to par":"TOTAL"}</small></div>
+        ${det.length?`<div class="ldet">${det.join(" · ")}</div>`:""}
+      </div>`;
+    }).join("")}
+  </div>`;
+
+  let holeBlock = "";
+  const hIdx = entry && entry.editing != null ? entry.editing : n;
+  if (entry || !done){
+    const d = dealerOf(hIdx), first = (d + 1) % state.players.length;
+    holeBlock = `<div class="tee">
+      <div class="hn num">${hIdx+1}</div>
+      <div class="hname">${HOLE_NAMES[hIdx]} · Par 4</div>
+      <div class="hmeta">Dealer <b>${esc(state.players[d])}</b> · ${esc(state.players[first])} flips first, dealer flips last</div>
+    </div>`;
+  }
+  if (entry) holeBlock += entryView(hIdx);
+  else if (!done) holeBlock += `<button class="primary" data-act="newHole" id="newHole">Score hole ${n+1}</button>`;
+
+  let tools = "";
+  if (n > 0){
+    tools = `<div class="btnrow"><button class="small" data-act="undo" id="undo">${confirmKey==="undo"?"Tap to confirm":"Undo last hole"}</button></div>`;
+  }
+
+  const reset = `<button class="small ghost" data-act="newgame" id="newgame">${confirmKey==="new"?"Tap to confirm":"New game"}</button>`;
+  return header(reset) + top + holeBlock + board + scorecard() + tools +
+    `<p class="hint">Your game is kept on this device.</p>`;
+}
+
+function markClass(v){
+  const d = v - PAR;
+  if (d <= -2) return "m-eagle";
+  if (d === -1) return "m-birdie";
+  if (d === 0) return "m-par";
+  if (d === 1) return "m-bogey";
+  return "m-double";
+}
+function scorecard(){
+  const n = state.holes.length;
+  const holeHeads = Array.from({length:HOLES},(_,h)=>`<th scope="col">${h+1}</th>`).join("");
+  const parRow = Array.from({length:HOLES},()=>`<th>${PAR}</th>`).join("");
+  const t = totalsAfter(n);
+  const rows = state.players.map((p,i) => {
+    const cells = Array.from({length:HOLES},(_,h) => {
+      if (h < n){
+        const v = state.holes[h][i];
+        return `<td><button class="cell" id="cell-${h}-${i}" data-act="editCell" data-h="${h}" data-i="${i}" aria-label="${esc(p)}, hole ${h+1}: ${v}. Tap to edit"><span class="mark ${markClass(v)}">${minus(v)}</span></button></td>`;
+      }
+      return `<td></td>`;
+    }).join("");
+    return `<tr><td class="name" title="${esc(p)}">${esc(p)}</td>${cells}<td class="tot">${n?minus(t[i]):""}</td><td class="tot tp">${n?toParHtml(t[i]-PAR*n):""}</td></tr>`;
+  }).join("");
+  return `<div class="card">
+    <div class="cardhead"><h2 class="grow">Scorecard</h2><span class="hint">Tap any score to fix it</span></div>
+    <div class="tablewrap"><table class="sc">
+      <thead><tr><th class="name" scope="col">Hole</th>${holeHeads}<th class="tot" scope="col">Tot</th><th class="tot tp" scope="col">Par</th></tr>
+      <tr class="par"><th class="name">Par</th>${parRow}<th class="tot">${PAR*HOLES}</th><th class="tot tp"></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <div class="legend">
+      <span><span class="mark m-eagle">2</span>Eagle or better</span>
+      <span><span class="mark m-birdie">3</span>Birdie</span>
+      <span><span class="mark m-bogey">5</span>Bogey</span>
+      <span><span class="mark m-double">6</span>Double bogey or worse</span>
+    </div>
+  </div>`;
+}
+
+function awardsView(){
+  const H = state.holes, P = state.players;
+  let bestV = Infinity, worstV = -Infinity, bestList = [], worstList = [];
+  H.forEach((h,hi) => h.forEach((v,i) => {
+    if (v < bestV){ bestV = v; bestList = [[i,hi]]; } else if (v === bestV) bestList.push([i,hi]);
+    if (v > worstV){ worstV = v; worstList = [[i,hi]]; } else if (v === worstV) worstList.push([i,hi]);
+  }));
+  const wins = P.map(()=>0), unders = P.map(()=>0);
+  H.forEach(h => { const m = Math.min(...h); h.forEach((v,i)=>{ if (v===m) wins[i]++; if (v < PAR) unders[i]++; }); });
+  const top = arr => { const m = Math.max(...arr); return { m, who: arr.map((v,i)=>i).filter(i=>arr[i]===m) }; };
+  const nameList = idxs => [...new Set(idxs)].map(i=>esc(P[i])).join(", ");
+  const holeList = list => list.slice(0,3).map(([i,h])=>`${esc(P[i])} on ${h+1}`).join(", ") + (list.length>3?"…":"");
+  const w = top(wins), u = top(unders);
+  return `<div class="panel">
+    <h2>Awards</h2>
+    <div class="awards">
+      <div class="award"><span class="an">Shot of the day</span><span class="aw">${nameList(bestList.map(x=>x[0]))}</span><span class="ad num">Best hole: ${minus(bestV)} (${holeList(bestList)})</span></div>
+      <div class="award"><span class="an">Most holes won</span><span class="aw">${nameList(w.who)}</span><span class="ad num">${w.m} of 9 holes, ties included</span></div>
+      <div class="award"><span class="an">Birdie machine</span><span class="aw">${u.m?nameList(u.who):"Nobody"}</span><span class="ad num">${u.m} holes under par</span></div>
+      <div class="award"><span class="an">Snowman</span><span class="aw">${nameList(worstList.map(x=>x[0]))}</span><span class="ad num">Worst hole: ${minus(worstV)} (${holeList(worstList)})</span></div>
+    </div>
+  </div>`;
+}
+
+function jacketSvg(){
+  return `<svg viewBox="0 0 80 90" aria-hidden="true">
+    <path d="M28 6 L40 16 L52 6 L68 12 L76 70 L64 72 L62 40 L60 86 L20 86 L18 40 L16 72 L4 70 L12 12 Z" fill="#0a4a2f" stroke="#f3c233" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M28 6 L40 44 L52 6" fill="none" stroke="#f3c233" stroke-width="1.5"/>
+    <path d="M34 8 L40 30 L46 8 L40 16 Z" fill="#fffefa"/>
+    <circle cx="40" cy="54" r="2" fill="#f3c233"/><circle cx="40" cy="66" r="2" fill="#f3c233"/>
+    <rect x="22" y="30" width="9" height="7" rx="1.5" fill="#f3c233"/>
+  </svg>`;
+}
+
+function entryView(hIdx){
+  const rows = state.players.map((p,i) => {
+    const v = String(entry.raw[i]); const neg = v.trim().startsWith("-");
+    return `<div class="erow"><span class="who">${esc(p)}</span>
+      <span class="scorebox"><button class="${neg?"neg":""}" data-act="sign" data-i="${i}" id="sign-${i}" aria-label="Switch ${esc(p)}'s score between plus and minus">±</button>
+      <input type="text" inputmode="numeric" id="score-${i}" data-score="${i}" value="${esc(v)}" aria-label="${esc(p)} hole ${hIdx+1} total" autocomplete="off"></span></div>`;
+  }).join("");
+  return `<div class="panel">
+    <div class="row"><h2 class="grow">${entry.editing!=null?"Edit hole":"Hole"} ${hIdx+1}</h2><button class="small ghost" data-act="cancel" id="cancel">Cancel</button></div>
+    <p class="hint">Enter each player's total. Use ± for minus scores like −10 or −30.</p>
+    <div>${rows}</div>
+    ${entry.error?`<div class="err">${esc(entry.error)}</div>`:""}
+    <button class="primary" data-act="saveHole" id="saveHole">${entry.editing!=null?"Save changes":"Post hole "+(hIdx+1)}</button>
+    ${entry.editing!=null && entry.editing===state.holes.length-1?`<button class="danger" data-act="delHole" id="delHole">${confirmKey==="del"?"Tap again to delete hole "+(hIdx+1):"Delete this hole"}</button>`:""}
+  </div>`;
+}
+
+function openEntry(editIdx, focusPlayer){
+  if (editIdx != null) entry = { editing:editIdx, raw:state.holes[editIdx].map(String), error:"" };
+  else entry = { editing:null, raw:state.players.map(()=>""), error:"" };
+  render();
+  const f = document.getElementById("score-" + (focusPlayer || 0));
+  if (f){ f.focus(); if (editIdx != null) f.select(); f.scrollIntoView({block:"center"}); }
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const act = b.dataset.act, i = b.dataset.i != null ? +b.dataset.i : null;
+  switch(act){
+    case "count": state.count = Math.min(7, Math.max(2, state.count + +b.dataset.d)); save(); render(); break;
+    case "start":
+      state.players = Array.from({length:state.count},(_,k)=>pname(k));
+      state.dealer0 = state.firstDealer; state.holes = []; state.phase = "play"; entry = null; save(); render(); break;
+    case "newHole": openEntry(null); break;
+    case "editCell": openEntry(+b.dataset.h, i); break;
+    case "cancel": entry = null; render(); break;
+    case "sign": {
+      const v = String(entry.raw[i]).trim();
+      entry.raw[i] = v.startsWith("-") ? v.slice(1) : "-" + v;
+      render(); const f = document.getElementById("score-"+i); if (f){ f.focus(); f.setSelectionRange(f.value.length,f.value.length); }
+      break;
+    }
+    case "saveHole": {
+      const vals = entry.raw.map(v=>String(v).trim());
+      const bad = vals.findIndex(v => !/^-?\d+$/.test(v));
+      if (bad >= 0){ entry.error = `Enter a whole number for ${state.players[bad]}.`; render(); break; }
+      const h = vals.map(v=>parseInt(v,10));
+      if (entry.editing != null) state.holes[entry.editing] = h; else state.holes.push(h);
+      entry = null; save(); render(); window.scrollTo({top:0}); break;
+    }
+    case "delHole": confirmThen("del", ()=>{ state.holes.splice(entry.editing,1); entry = null; save(); render(); }); break;
+    case "undo": confirmThen("undo", ()=>{ state.holes.pop(); entry = null; save(); render(); }); break;
+    case "rematch": state.holes = []; state.dealer0 = (state.dealer0 + HOLES) % state.players.length; entry = null; save(); render(); break;
+    case "newsetup": state.phase = "setup"; state.holes = []; entry = null; save(); render(); break;
+    case "newgame": confirmThen("new", ()=>{ state.phase = "setup"; state.holes = []; entry = null; save(); render(); }); break;
+  }
+});
+
+document.addEventListener("input", e => {
+  const t = e.target;
+  if (t.dataset.name != null){
+    state.names[+t.dataset.name] = t.value; save();
+    const sel = document.getElementById("first-dealer");
+    if (sel && sel.options[+t.dataset.name]) sel.options[+t.dataset.name].textContent = pname(+t.dataset.name);
+  }
+  if (t.dataset.score != null && entry){
+    const i = +t.dataset.score;
+    const clean = t.value.replace(/[^\d-]/g,"").replace(/(?!^)-/g,"");
+    if (clean !== t.value) t.value = clean;
+    entry.raw[i] = clean; entry.error = "";
+    const sb = document.getElementById("sign-"+i); if (sb) sb.classList.toggle("neg", clean.startsWith("-"));
+    const err = document.querySelector(".err"); if (err) err.remove();
+  }
+});
+document.addEventListener("change", e => { if (e.target.id === "first-dealer"){ state.firstDealer = +e.target.value; save(); } });
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.dataset.score != null){
+    e.preventDefault();
+    const nx = document.getElementById("score-" + (+e.target.dataset.score + 1));
+    if (nx) nx.focus(); else e.target.blur();
+  }
+});
+
+render();
+</script>
+</body>
+</html>
