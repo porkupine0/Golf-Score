@@ -147,6 +147,19 @@ table.st{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;f
 table.st th,table.st td{padding:7px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
 table.st th{font-family:"Barlow Condensed",sans-serif;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
 table.st th:first-child,table.st td:first-child{text-align:left}
+
+/* history & career stats */
+.brand h1{white-space:nowrap}
+.hdrbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+button.link{background:none;border:0;padding:0;color:var(--over);text-decoration:underline;text-underline-offset:2px;font-weight:700;border-radius:4px;text-align:left}
+.gitem{border-top:1px solid var(--line);padding:12px 0 4px;display:flex;flex-direction:column;gap:8px}
+.gitem:first-of-type{border-top:0;padding-top:0}
+.gmeta{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.gmeta b{font-family:"Barlow Condensed",sans-serif;font-size:18px;letter-spacing:.04em}
+.gscores{font-size:14px;color:var(--muted);overflow-wrap:anywhere}
+.gscores b{color:var(--ink)}
+.gitem .card{box-shadow:none}
+.empty{text-align:center;padding:20px 8px;color:var(--muted)}
 </style>
 <style>body{margin:0}[hidden]{display:none!important}</style>
 </head>
@@ -162,9 +175,40 @@ const HOLE_NAMES = ["Tea Olive","Pink Dogwood","Flowering Peach","Flower Crab Ap
 let state = load() || { phase:"setup", count:4, names:["","","","","","",""], firstDealer:0, players:[], dealer0:0, holes:[] };
 let entry = null; // {editing, raw:[], error, focus}
 let confirmKey = null, confirmTimer = null;
+let setupError = "";
+
+// Finished games are archived here: [{id, date, players:[names], holes:[[scores]], dealer0}]
+const HKEY = "card-golf-history-v1";
+let history = loadHistory();
+let view = "game", selPlayer = null, openGame = null, showAllGames = false, histMsg = "";
 
 function load(){ try{ const s = localStorage.getItem(KEY); return s ? JSON.parse(s) : null; }catch(e){ return null; } }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+function save(){ syncHistory(); try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+function loadHistory(){ try{ const s = localStorage.getItem(HKEY); const a = s ? JSON.parse(s) : []; return Array.isArray(a) ? a.filter(validGame) : []; }catch(e){ return []; } }
+function saveHistory(){ try{ localStorage.setItem(HKEY, JSON.stringify(history)); }catch(e){} }
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+function validGame(g){
+  return !!g && typeof g.id === "string" && Array.isArray(g.players) && g.players.length >= 2 && g.players.every(p => typeof p === "string")
+    && Array.isArray(g.holes) && g.holes.length === HOLES && g.holes.every(h => Array.isArray(h) && h.length === g.players.length && h.every(Number.isInteger));
+}
+// Keep the archive in step with the current game: a finished game is stored (edits included); un-finishing it (undo) removes it.
+function syncHistory(){
+  if (state.phase !== "play" || !state.id) return;
+  const k = history.findIndex(g => g.id === state.id);
+  if (over()){
+    const g = { id:state.id, date: k >= 0 ? history[k].date : new Date().toISOString(), players:state.players.slice(), holes:state.holes.map(h => h.slice()), dealer0:state.dealer0 };
+    if (k >= 0) history[k] = g; else history.push(g);
+  } else if (k >= 0) history.splice(k, 1);
+  else return;
+  saveHistory();
+}
+
+// Players are matched across games by name: spacing and capitals don't matter. Unnamed "Player N" seats are left out of career stats.
+const pkey = n => String(n).trim().replace(/\s+/g," ").toLowerCase();
+const isGuest = n => /^player \d+$/.test(pkey(n));
+const gameTotals = g => g.players.map((_,i) => g.holes.reduce((s,h) => s + h[i], 0));
+const byDate = () => history.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
+function fmtDate(iso){ const d = new Date(iso); return isNaN(d) ? "Unknown date" : d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}); }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const minus = n => n < 0 ? "−" + Math.abs(n) : String(n);
 function toParHtml(n){ return n === 0 ? `<span>E</span>` : n < 0 ? `<span class="under">−${-n}</span>` : `<span class="over">+${n}</span>`; }
@@ -193,12 +237,18 @@ function confirmThen(key, fn){
 function render(){
   const app = document.getElementById("app");
   const focusId = document.activeElement && document.activeElement.id;
-  app.innerHTML = state.phase === "setup" ? setupView() : playView();
+  app.innerHTML = view === "stats" ? statsView() : state.phase === "setup" ? setupView() : playView();
   if (focusId){ const el = document.getElementById(focusId); if (el) el.focus(); }
 }
 
 function header(extra=""){
-  return `<div class="brand"><div><h1>Card Golf</h1><div class="sub">9 holes · Par 36</div></div>${extra}</div>`;
+  return `<div class="brand"><div><h1>Card Golf</h1><div class="sub">9 holes · Par 36</div></div><div class="hdrbtns">${extra}</div></div>`;
+}
+const statsBtn = () => `<button class="small" data-act="stats" id="statsBtn">Stats</button>`;
+function knownNames(){ // for name suggestions, most-played first
+  const m = new Map();
+  byDate().forEach(g => g.players.forEach(n => { if (isGuest(n)) return; const k = pkey(n), r = m.get(k) || { n, c:0 }; r.n = n.trim(); r.c++; m.set(k, r); }));
+  return [...m.values()].sort((a,b) => b.c - a.c || a.n.localeCompare(b.n)).map(r => r.n);
 }
 
 function setupView(){
@@ -206,10 +256,12 @@ function setupView(){
   let names = "";
   for (let i=0;i<state.count;i++){
     names += `<div class="row"><span class="sub num" style="width:22px">${i+1}</span>
-      <input type="text" id="name-${i}" data-name="${i}" placeholder="Player ${i+1}" value="${esc(state.names[i]||"")}" maxlength="16" autocomplete="off"></div>`;
+      <input type="text" id="name-${i}" data-name="${i}" placeholder="Player ${i+1}" value="${esc(state.names[i]||"")}" maxlength="16" autocomplete="off" list="known-players"></div>`;
   }
+  const known = knownNames();
   const opts = Array.from({length:state.count},(_,i)=>`<option value="${i}" ${i===state.firstDealer?"selected":""}>${esc(pname(i))}</option>`).join("");
-  return header() + `
+  return header(statsBtn()) + `
+  <datalist id="known-players">${known.map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>
   <div class="panel">
     <div class="eyebrow">Players</div>
     <div class="stepper">
@@ -223,9 +275,11 @@ function setupView(){
       <label class="eyebrow" for="first-dealer">Deals the first hole</label>
       <select id="first-dealer">${opts}</select>
     </div>
+    ${setupError?`<div class="err">${esc(setupError)}</div>`:""}
     <button class="primary" data-act="start" id="start">Tee off</button>
   </div>
-  <p class="hint">Enter each player's total for the hole. Lowest total after 9 holes wins the green jacket.</p>`;
+  <p class="hint">Enter each player's total for the hole. Lowest total after 9 holes wins the green jacket.</p>
+  <p class="hint">Career stats are matched by name, so spell each player the same way every game${known.length?" (past players are suggested as you type)":""}. Capitals don't matter.</p>`;
 }
 
 function playView(){
@@ -300,8 +354,8 @@ function playView(){
   }
 
   const reset = `<button class="small ghost" data-act="newgame" id="newgame">${confirmKey==="new"?"Tap to confirm":"New game"}</button>`;
-  return header(reset) + top + holeBlock + board + scorecard() + (done || !n ? "" : awardsView(true)) + tools +
-    `<p class="hint">Your game is kept on this device.</p>`;
+  return header(statsBtn() + reset) + top + holeBlock + board + scorecard() + (done || !n ? "" : awardsView(true)) + tools +
+    `<p class="hint">${done?"This game is saved to your history.":"Finished games are saved to your history on this device."}</p>`;
 }
 
 function markClass(v){
@@ -312,28 +366,31 @@ function markClass(v){
   if (d === 1) return "m-bogey";
   return "m-double";
 }
-function scorecard(){
-  const n = state.holes.length;
+function scTable(players, holes, editable){
+  const n = holes.length;
   const holeHeads = Array.from({length:HOLES},(_,h)=>`<th scope="col">${h+1}</th>`).join("");
   const parRow = Array.from({length:HOLES},()=>`<th>${PAR}</th>`).join("");
-  const t = totalsAfter(n);
-  const rows = state.players.map((p,i) => {
+  const t = players.map((_,i) => holes.reduce((s,h) => s + h[i], 0));
+  const rows = players.map((p,i) => {
     const cells = Array.from({length:HOLES},(_,h) => {
       if (h < n){
-        const v = state.holes[h][i];
-        return `<td><button class="cell" id="cell-${h}-${i}" data-act="editCell" data-h="${h}" data-i="${i}" aria-label="${esc(p)}, hole ${h+1}: ${v}. Tap to edit"><span class="mark ${markClass(v)}">${minus(v)}</span></button></td>`;
+        const v = holes[h][i], mark = `<span class="mark ${markClass(v)}">${minus(v)}</span>`;
+        return editable ? `<td><button class="cell" id="cell-${h}-${i}" data-act="editCell" data-h="${h}" data-i="${i}" aria-label="${esc(p)}, hole ${h+1}: ${v}. Tap to edit">${mark}</button></td>` : `<td>${mark}</td>`;
       }
       return `<td></td>`;
     }).join("");
     return `<tr><td class="name" title="${esc(p)}">${esc(p)}</td>${cells}<td class="tot">${n?minus(t[i]):""}</td><td class="tot tp">${n?toParHtml(t[i]-PAR*n):""}</td></tr>`;
   }).join("");
-  return `<div class="card">
-    <div class="cardhead"><h2 class="grow">Scorecard</h2><span class="hint">Tap any score to fix it</span></div>
-    <div class="tablewrap"><table class="sc">
+  return `<div class="tablewrap"><table class="sc">
       <thead><tr><th class="name" scope="col">Hole</th>${holeHeads}<th class="tot" scope="col">Tot</th><th class="tot tp" scope="col">Par</th></tr>
       <tr class="par"><th class="name">Par</th>${parRow}<th class="tot">${PAR*HOLES}</th><th class="tot tp"></th></tr></thead>
       <tbody>${rows}</tbody>
-    </table></div>
+    </table></div>`;
+}
+function scorecard(){
+  return `<div class="card">
+    <div class="cardhead"><h2 class="grow">Scorecard</h2><span class="hint">Tap any score to fix it</span></div>
+    ${scTable(state.players, state.holes, true)}
     <div class="legend">
       <span><span class="mark m-eagle">2</span>Eagle or better</span>
       <span><span class="mark m-birdie">3</span>Birdie</span>
@@ -358,7 +415,18 @@ function awardsView(live){
   const w = top(wins), u = top(unders);
   const pb = P.map((_,i)=>Math.min(...H.map(h=>h[i]))), pw = P.map((_,i)=>Math.max(...H.map(h=>h[i])));
   const tt = totalsAfter(H.length);
-  const table = `<div class="tablewrap"><table class="st"><thead><tr><th>Player</th><th>Won</th><th>Under par</th><th>Best</th><th>Worst</th><th>Avg</th></tr></thead><tbody>${P.map((p,i)=>`<tr><td>${esc(p)}</td><td>${wins[i]}</td><td>${unders[i]}</td><td>${minus(pb[i])}</td><td>${minus(pw[i])}</td><td>${(tt[i]/H.length).toFixed(1)}</td></tr>`).join("")}</tbody></table></div>`;
+  // holes spent leading, and each player's lowest position along the way
+  const led = P.map(()=>0), lowPos = P.map(()=>1);
+  for (let k=1; k<=H.length; k++){
+    const tk = totalsAfter(k), m = Math.min(...tk), rk = ranks(tk);
+    tk.forEach((v,i) => { if (v === m) led[i]++; lowPos[i] = Math.max(lowPos[i], rk[i].p); });
+  }
+  const nowPos = ranks(tt), cb = top(P.map((_,i) => lowPos[i] - nowPos[i].p));
+  const sd = P.map((_,i) => { const xs = H.map(h=>h[i]), m = xs.reduce((a,b)=>a+b,0)/xs.length; return Math.sqrt(xs.reduce((a,b)=>a+(b-m)**2,0)/xs.length); });
+  const sdMin = Math.min(...sd), steady = P.map((_,i)=>i).filter(i => sd[i] - sdMin < 1e-9);
+  const pars = P.map((_,i) => H.filter(h => h[i] === PAR).length), bogeys = P.map((_,i) => H.filter(h => h[i] > PAR).length);
+  const table = `<div class="tablewrap"><table class="st"><thead><tr><th>Player</th><th>Won</th><th>Led</th><th>Under</th><th>Par</th><th>Over</th><th>Best</th><th>Worst</th><th>Avg</th></tr></thead><tbody>${P.map((p,i)=>`<tr><td>${esc(p)}</td><td>${wins[i]}</td><td>${led[i]}</td><td>${unders[i]}</td><td>${pars[i]}</td><td>${bogeys[i]}</td><td>${minus(pb[i])}</td><td>${minus(pw[i])}</td><td>${(tt[i]/H.length).toFixed(1)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="hint">Won: lowest score on the hole, ties included. Led: holes finished in the lead. Under, Par, Over: holes scored below, at, or above par 4.</p>`;
   return `<div class="panel">
     <h2>${live?"Stats so far":"Awards"}</h2>
     <div class="awards">
@@ -366,9 +434,184 @@ function awardsView(live){
       <div class="award"><span class="an">Most holes won</span><span class="aw">${nameList(w.who)}</span><span class="ad num">${w.m} of ${H.length} holes, ties included</span></div>
       <div class="award"><span class="an">Birdie machine</span><span class="aw">${u.m?nameList(u.who):"Nobody"}</span><span class="ad num">${u.m} holes under par</span></div>
       <div class="award"><span class="an">Snowman</span><span class="aw">${nameList(worstList.map(x=>x[0]))}</span><span class="ad num">Worst hole: ${minus(worstV)} (${holeList(worstList)})</span></div>
+      <div class="award"><span class="an">Comeback</span><span class="aw">${cb.m>0?nameList(cb.who):"Nobody yet"}</span><span class="ad num">${cb.m>0?`Climbed ${cb.m} place${cb.m>1?"s":""} from their low point`:"No one has climbed the board"}</span></div>
+      <div class="award"><span class="an">Steady hand</span><span class="aw">${H.length>1?nameList(steady):"After hole 2"}</span><span class="ad num">${H.length>1?`Most consistent hole scores (±${sdMin.toFixed(1)})`:"Needs two holes"}</span></div>
     </div>
     ${table}
   </div>`;
+}
+
+function careerStats(){
+  const map = new Map();
+  byDate().forEach(g => {
+    const t = gameTotals(g), rk = ranks(t), best = Math.min(...t), holeMin = g.holes.map(h => Math.min(...h));
+    g.players.forEach((name,i) => {
+      if (isGuest(name)) return;
+      const k = pkey(name);
+      let p = map.get(k);
+      if (!p){ p = { k, name:"", games:0, wins:0, shared:0, sum:0, pos:0, best:Infinity, worst:-Infinity, holes:0, holeWins:0, under:0, eagles:0, pars:0, bestHole:Infinity, streak:0, bestStreak:0, h2h:new Map(), log:[] }; map.set(k, p); }
+      p.name = name.trim(); // latest spelling wins
+      const won = t[i] === best;
+      p.games++; p.sum += t[i]; p.pos += rk[i].p;
+      p.best = Math.min(p.best, t[i]); p.worst = Math.max(p.worst, t[i]);
+      if (won){ p.wins++; if (rk[i].tied) p.shared++; p.streak++; p.bestStreak = Math.max(p.bestStreak, p.streak); } else p.streak = 0;
+      g.holes.forEach((h,hi) => {
+        const v = h[i]; p.holes++;
+        if (v === holeMin[hi]) p.holeWins++;
+        if (v < PAR) p.under++; if (v <= PAR - 2) p.eagles++; if (v === PAR) p.pars++;
+        p.bestHole = Math.min(p.bestHole, v);
+      });
+      p.log.push({ g, total:t[i], pos:rk[i], won, field:g.players.length });
+      g.players.forEach((o,j) => {
+        const ok = pkey(o);
+        if (j === i || isGuest(o) || ok === k) return;
+        const r = p.h2h.get(ok) || { name:"", w:0, l:0, t:0 };
+        r.name = o.trim();
+        if (t[i] < t[j]) r.w++; else if (t[i] > t[j]) r.l++; else r.t++;
+        p.h2h.set(ok, r);
+      });
+    });
+  });
+  return [...map.values()].sort((a,b) => b.wins - a.wins || a.sum/a.games - b.sum/b.games || a.name.localeCompare(b.name));
+}
+const pct = (a,b) => b ? Math.round(100*a/b) + "%" : "–";
+const avg = (a,b) => b ? (a/b).toFixed(1) : "–";
+const pLink = (k, name) => `<button class="link" data-act="player" data-k="${esc(k)}">${esc(name)}</button>`;
+const award = (t, w, d) => `<div class="award"><span class="an">${t}</span><span class="aw">${w}</span><span class="ad num">${d}</span></div>`;
+
+function statsView(){
+  const stats = careerStats();
+  const back = `<button class="small ghost" data-act="back" id="back">Back to game</button>`;
+  if (!history.length){
+    return header(back) + `<div class="panel"><h2>Stats &amp; history</h2><p class="empty">No finished games yet. Every game you finish is saved here automatically.</p></div>` + backupView();
+  }
+  const sel = selPlayer && stats.find(p => p.k === selPlayer);
+  const first = byDate()[0];
+  return header(back) + (sel ? playerView(sel) : `
+  <div class="panel">
+    <div><h2>Career stats</h2><p class="hint">${history.length} game${history.length>1?"s":""} since ${fmtDate(first.date)}. Tap a name for their record and head-to-head.</p></div>
+    ${stats.length ? `<div class="tablewrap"><table class="st"><thead><tr><th>Player</th><th>GP</th><th>Wins</th><th>Win %</th><th>Avg</th><th>Best</th><th>Finish</th><th>Holes won</th><th>Under</th></tr></thead><tbody>
+      ${stats.map(p => `<tr><td>${pLink(p.k, p.name)}</td><td>${p.games}</td><td>${p.wins}</td><td>${pct(p.wins,p.games)}</td><td>${avg(p.sum,p.games)}</td><td>${minus(p.best)}</td><td>${avg(p.pos,p.games)}</td><td>${pct(p.holeWins,p.holes)}</td><td>${p.under}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="hint">GP: games played. Wins include shared wins. Avg: average 9-hole total. Finish: average finishing place. Holes won: share of holes with the lowest score. Under: holes under par.</p>`
+    : `<p class="empty">Only unnamed players so far. Name your players to track them.</p>`}
+  </div>
+  ${recordsView(stats)}`) + gameLogView(sel) + backupView();
+}
+
+function playerView(p){
+  const h2h = [...p.h2h.values()].sort((a,b) => (b.w+b.l+b.t) - (a.w+a.l+a.t) || a.name.localeCompare(b.name));
+  const recent = p.log.slice(-10).reverse();
+  return `<div class="panel">
+    <div class="row"><h2 class="grow">${esc(p.name)}</h2><button class="small ghost" data-act="allPlayers" id="allPlayers">All players</button></div>
+    <div class="awards">
+      ${award("Record", `${p.wins} win${p.wins===1?"":"s"} in ${p.games}`, `${pct(p.wins,p.games)} win rate${p.shared?` · ${p.shared} shared`:""}`)}
+      ${award("Average round", avg(p.sum,p.games), `${avg(p.sum,p.holes)} per hole · finishes ${avg(p.pos,p.games)} on average`)}
+      ${award("Best round", minus(p.best), `Worst: ${minus(p.worst)}`)}
+      ${award("Best hole", minus(p.bestHole), `${p.eagles} eagle${p.eagles===1?"":"s"} or better, ${p.under - p.eagles} birdie${p.under-p.eagles===1?"":"s"}`)}
+      ${award("Holes won", `${p.holeWins} of ${p.holes}`, `${pct(p.holeWins,p.holes)} · ${p.pars} pars`)}
+      ${award("Win streak", `${p.streak} now`, `Longest: ${p.bestStreak}`)}
+    </div>
+    ${h2h.length ? `<div><div class="eyebrow">Head to head</div>
+      <div class="tablewrap"><table class="st"><thead><tr><th>Against</th><th>Games</th><th>Won</th><th>Lost</th><th>Tied</th><th>Win %</th></tr></thead><tbody>
+      ${h2h.map(r => { const n = r.w + r.l + r.t; return `<tr><td>${pLink(pkey(r.name), r.name)}</td><td>${n}</td><td>${r.w}</td><td>${r.l}</td><td>${r.t}</td><td>${pct(r.w,n)}</td></tr>`; }).join("")}
+      </tbody></table></div>
+      <p class="hint">Won means ${esc(p.name)} finished with a lower total than that player in the same game.</p></div>` : ""}
+    <div><div class="eyebrow">Last ${recent.length} game${recent.length>1?"s":""}</div>
+      <div class="tablewrap"><table class="st"><thead><tr><th>Date</th><th>Total</th><th>To par</th><th>Finish</th></tr></thead><tbody>
+      ${recent.map(r => `<tr><td>${fmtDate(r.g.date)}</td><td>${minus(r.total)}</td><td>${toParHtml(r.total - PAR*HOLES)}</td><td>${r.won?"<b>Won</b>":posLabel(r.pos)+" of "+r.field}${r.won&&r.pos.tied?" (shared)":""}</td></tr>`).join("")}
+      </tbody></table></div></div>
+  </div>`;
+}
+
+function recordsView(stats){
+  const rounds = [], holes = [], margins = [];
+  history.forEach(g => {
+    const t = gameTotals(g);
+    g.players.forEach((n,i) => { if (!isGuest(n)) rounds.push({ n:n.trim(), v:t[i], g }); });
+    g.holes.forEach((h,hi) => h.forEach((v,i) => { if (!isGuest(g.players[i])) holes.push({ n:g.players[i].trim(), v, g, hi }); }));
+    const s = t.slice().sort((a,b) => a - b), w = t.indexOf(s[0]);
+    if (s[1] > s[0] && !isGuest(g.players[w])) margins.push({ n:g.players[w].trim(), v:s[1] - s[0], g });
+  });
+  if (!rounds.length) return "";
+  const pick = (list, fn) => { const m = fn(...list.map(x => x.v)); return { m, who:list.filter(x => x.v === m) }; };
+  const names = who => esc([...new Set(who.map(x => x.n))].slice(0,3).join(", ")) + (new Set(who.map(x => x.n)).size > 3 ? "…" : "");
+  const when = who => who.length === 1 ? fmtDate(who[0].g.date) : `${who.length} times`;
+  const lo = pick(rounds, Math.min), hi = pick(rounds, Math.max), bh = pick(holes, Math.min);
+  const mg = margins.length ? pick(margins, Math.max) : null;
+  const mostW = stats.length ? Math.max(...stats.map(p => p.wins)) : 0;
+  const longS = stats.length ? Math.max(...stats.map(p => p.bestStreak)) : 0;
+  const whoOf = (arr, m, f) => esc(arr.filter(p => p[f] === m).map(p => p.name).slice(0,3).join(", "));
+  return `<div class="panel">
+    <h2>Records</h2>
+    <div class="awards">
+      ${award("Lowest round", names(lo.who), `${minus(lo.m)} · ${when(lo.who)}`)}
+      ${award("Highest round", names(hi.who), `${minus(hi.m)} · ${when(hi.who)}`)}
+      ${award("Best hole ever", names(bh.who), `${minus(bh.m)} · ${bh.who.length === 1 ? `hole ${bh.who[0].hi+1}, ${fmtDate(bh.who[0].g.date)}` : `${bh.who.length} times`}`)}
+      ${award("Biggest win", mg ? names(mg.who) : "–", mg ? `By ${mg.m} · ${when(mg.who)}` : "No outright wins yet")}
+      ${award("Most wins", mostW ? whoOf(stats, mostW, "wins") : "–", `${mostW} win${mostW===1?"":"s"}`)}
+      ${award("Longest win streak", longS ? whoOf(stats, longS, "bestStreak") : "–", `${longS} in a row`)}
+    </div>
+  </div>`;
+}
+
+function gameLogView(sel){
+  let games = byDate().reverse();
+  if (sel) games = games.filter(g => g.players.some(n => pkey(n) === sel.k));
+  const shown = showAllGames ? games : games.slice(0, 10);
+  const items = shown.map(g => {
+    const t = gameTotals(g), best = Math.min(...t);
+    const order = t.map((_,i) => i).sort((a,b) => t[a] - t[b] || a - b);
+    const winners = order.filter(i => t[i] === best).map(i => esc(g.players[i])).join(" &amp; ");
+    const open = openGame === g.id, del = "dg-" + g.id;
+    return `<div class="gitem">
+      <div class="gmeta"><b>${fmtDate(g.date)}</b><span class="hint">${winners} ${order.filter(i=>t[i]===best).length>1?"tied":"won"}</span></div>
+      <div class="gscores num">${order.map(i => `${esc(g.players[i])} <b>${minus(t[i])}</b>`).join(" · ")}</div>
+      <div class="btnrow"><button class="small" data-act="viewGame" data-id="${esc(g.id)}" id="vg-${esc(g.id)}">${open?"Hide scorecard":"Scorecard"}</button>
+        <button class="small danger" data-act="delGame" data-id="${esc(g.id)}" id="${esc(del)}">${confirmKey===del?"Tap to delete":"Delete"}</button></div>
+      ${open ? `<div class="card">${scTable(g.players, g.holes, false)}</div>` : ""}
+    </div>`;
+  }).join("");
+  return `<div class="panel">
+    <h2>${sel ? `${esc(sel.name)}'s games` : "Game log"}</h2>
+    <div>${items}</div>
+    ${games.length > 10 ? `<button class="small" data-act="allGames" id="allGames">${showAllGames?"Show fewer":`Show all ${games.length} games`}</button>` : ""}
+  </div>`;
+}
+
+function backupView(){
+  return `<div class="panel">
+    <h2>Backup</h2>
+    <p class="hint">History is stored in this browser only. Clearing site data or switching phones loses it, so download a backup now and then. Restoring adds games from a backup file and skips any you already have.</p>
+    <div class="btnrow"><button data-act="export" id="export" ${history.length?"":"disabled"}>Download backup</button><button data-act="import" id="importBtn">Restore from file</button></div>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+    ${histMsg ? `<p class="hint" role="status">${esc(histMsg)}</p>` : ""}
+  </div>`;
+}
+
+function exportHistory(){
+  const data = JSON.stringify({ app:"card-golf", version:1, exported:new Date().toISOString(), games:history }, null, 2);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([data], { type:"application/json" }));
+  a.download = `card-golf-history-${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function importHistory(text){
+  let data;
+  try{ data = JSON.parse(text); }catch(e){ histMsg = "That file isn't a Card Golf backup."; return; }
+  const games = Array.isArray(data) ? data : data && Array.isArray(data.games) ? data.games : null;
+  if (!games){ histMsg = "That file isn't a Card Golf backup."; return; }
+  const have = new Set(history.map(g => g.id));
+  let added = 0, skipped = 0, bad = 0;
+  games.forEach(g => {
+    if (!validGame(g)){ bad++; return; }
+    if (have.has(g.id)){ skipped++; return; }
+    history.push({ id:g.id, date: isNaN(new Date(g.date)) ? new Date().toISOString() : g.date, players:g.players.slice(), holes:g.holes.map(h => h.slice()), dealer0:g.dealer0|0 });
+    have.add(g.id); added++;
+  });
+  saveHistory();
+  histMsg = `Added ${added} game${added===1?"":"s"}.` + (skipped ? ` ${skipped} already here.` : "") + (bad ? ` ${bad} unreadable.` : "");
 }
 
 function jacketSvg(){
@@ -411,9 +654,14 @@ document.addEventListener("click", e => {
   const act = b.dataset.act, i = b.dataset.i != null ? +b.dataset.i : null;
   switch(act){
     case "count": state.count = Math.min(7, Math.max(2, state.count + +b.dataset.d)); save(); render(); break;
-    case "start":
-      state.players = Array.from({length:state.count},(_,k)=>pname(k));
+    case "start": {
+      const names = Array.from({length:state.count},(_,k)=>pname(k));
+      const dup = names.find((n,k) => names.findIndex(m => pkey(m) === pkey(n)) !== k);
+      if (dup){ setupError = `Two players are named ${dup}. Add an initial so their stats stay separate.`; render(); break; }
+      setupError = "";
+      state.players = names; state.id = newId();
       state.dealer0 = state.firstDealer; state.holes = []; state.phase = "play"; entry = null; save(); render(); break;
+    }
     case "newHole": openEntry(null); break;
     case "editCell": openEntry(+b.dataset.h, i); break;
     case "cancel": entry = null; render(); break;
@@ -433,9 +681,26 @@ document.addEventListener("click", e => {
     }
     case "delHole": confirmThen("del", ()=>{ state.holes.splice(entry.editing,1); entry = null; save(); render(); }); break;
     case "undo": confirmThen("undo", ()=>{ state.holes.pop(); entry = null; save(); render(); }); break;
-    case "rematch": state.holes = []; state.dealer0 = (state.dealer0 + HOLES) % state.players.length; entry = null; save(); render(); break;
+    case "rematch": state.holes = []; state.id = newId(); state.dealer0 = (state.dealer0 + HOLES) % state.players.length; entry = null; save(); render(); break;
     case "newsetup": state.phase = "setup"; state.holes = []; entry = null; save(); render(); break;
     case "newgame": confirmThen("new", ()=>{ state.phase = "setup"; state.holes = []; entry = null; save(); render(); }); break;
+    case "stats": view = "stats"; selPlayer = null; openGame = null; histMsg = ""; render(); window.scrollTo({top:0}); break;
+    case "back": view = "game"; render(); window.scrollTo({top:0}); break;
+    case "player": selPlayer = b.dataset.k; openGame = null; showAllGames = false; render(); window.scrollTo({top:0}); break;
+    case "allPlayers": selPlayer = null; openGame = null; showAllGames = false; render(); window.scrollTo({top:0}); break;
+    case "viewGame": openGame = openGame === b.dataset.id ? null : b.dataset.id; render(); break;
+    case "allGames": showAllGames = !showAllGames; render(); break;
+    case "delGame": {
+      const id = b.dataset.id;
+      confirmThen("dg-" + id, ()=>{
+        history = history.filter(g => g.id !== id); saveHistory();
+        if (state.id === id) state.id = null; // don't re-archive it on the next edit
+        save(); render();
+      });
+      break;
+    }
+    case "export": exportHistory(); break;
+    case "import": document.getElementById("importFile").click(); break;
   }
 });
 
@@ -443,6 +708,7 @@ document.addEventListener("input", e => {
   const t = e.target;
   if (t.dataset.name != null){
     state.names[+t.dataset.name] = t.value; save();
+    if (setupError){ setupError = ""; const err = document.querySelector(".err"); if (err) err.remove(); }
     const sel = document.getElementById("first-dealer");
     if (sel && sel.options[+t.dataset.name]) sel.options[+t.dataset.name].textContent = pname(+t.dataset.name);
   }
@@ -455,7 +721,12 @@ document.addEventListener("input", e => {
     const err = document.querySelector(".err"); if (err) err.remove();
   }
 });
-document.addEventListener("change", e => { if (e.target.id === "first-dealer"){ state.firstDealer = +e.target.value; save(); } });
+document.addEventListener("change", e => {
+  if (e.target.id === "first-dealer"){ state.firstDealer = +e.target.value; save(); }
+  if (e.target.id === "importFile" && e.target.files[0]){
+    e.target.files[0].text().then(importHistory, () => { histMsg = "Couldn't read that file."; }).then(render);
+  }
+});
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target.dataset.score != null){
     e.preventDefault();
@@ -464,6 +735,8 @@ document.addEventListener("keydown", e => {
   }
 });
 
+// Games started before history existed get an id, so a finished one is archived right away.
+if (state.phase === "play" && !state.id){ state.id = newId(); save(); }
 render();
 </script>
 </body>
