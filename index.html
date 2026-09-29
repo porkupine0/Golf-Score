@@ -147,6 +147,33 @@ table.st{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;f
 table.st th,table.st td{padding:7px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
 table.st th{font-family:"Barlow Condensed",sans-serif;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
 table.st th:first-child,table.st td:first-child{text-align:left}
+
+/* history & career stats */
+.brand h1{white-space:nowrap}
+.hdrbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+button.link{background:none;border:0;padding:0;color:var(--over);text-decoration:underline;text-underline-offset:2px;font-weight:700;border-radius:4px;text-align:left}
+.gitem{border-top:1px solid var(--line);padding:12px 0 4px;display:flex;flex-direction:column;gap:8px}
+.gitem:first-of-type{border-top:0;padding-top:0}
+.gmeta{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.gmeta b{font-family:"Barlow Condensed",sans-serif;font-size:18px;letter-spacing:.04em}
+.gscores{font-size:14px;color:var(--muted);overflow-wrap:anywhere}
+.gscores b{color:var(--ink)}
+.gitem .card{box-shadow:none}
+.empty{text-align:center;padding:20px 8px;color:var(--muted)}
+.tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:2px 6px;border-radius:6px;background:var(--lead);color:var(--ink);border:1px solid var(--lead-line)}
+.nudge{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;background:var(--lead);border:1px solid var(--lead-line);font-size:14px;font-weight:600}
+.chart{position:relative;margin-top:8px;outline-offset:4px}
+.chart svg{display:block;overflow:visible;touch-action:pan-y}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .ref{stroke:var(--muted);stroke-width:1}
+.chart .cross{stroke:var(--muted);stroke-width:1}
+.chart .series{fill:none;stroke:var(--over);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .dot{fill:var(--over);stroke:var(--surface);stroke-width:2}
+.chart .dot.hot{stroke-width:3}
+.chart .tick{fill:var(--muted);font-size:11px;font-family:"Figtree",sans-serif;font-variant-numeric:tabular-nums}
+.chart .endlabel{fill:var(--ink);font-size:13px;font-weight:700;font-family:"Figtree",sans-serif}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:13px;color:var(--muted);box-shadow:var(--shadow);white-space:nowrap}
+.tip b{color:var(--ink);font-size:16px}
 </style>
 <style>body{margin:0}[hidden]{display:none!important}</style>
 </head>
@@ -162,9 +189,45 @@ const HOLE_NAMES = ["Tea Olive","Pink Dogwood","Flowering Peach","Flower Crab Ap
 let state = load() || { phase:"setup", count:4, names:["","","","","","",""], firstDealer:0, players:[], dealer0:0, holes:[] };
 let entry = null; // {editing, raw:[], error, focus}
 let confirmKey = null, confirmTimer = null;
+let setupError = "";
+
+// Every game with at least one hole is archived here: [{id, date, players:[names], holes:[[scores]], dealer0}].
+// A game with all 9 holes counts toward stats; shorter ones are unfinished and can be resumed.
+const HKEY = "card-golf-history-v1";
+let history = loadHistory();
+let view = "game", selPlayer = null, openGame = null, showAllGames = false, histMsg = "";
+let range = "all", renaming = false, renameVal = "", renameErr = "", shareMsg = "";
+const BKEY = "card-golf-last-backup"; // finished-game count at the last backup
+const BLOWUP = 10; // a hole score this high or higher is a blow-up
 
 function load(){ try{ const s = localStorage.getItem(KEY); return s ? JSON.parse(s) : null; }catch(e){ return null; } }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+function save(){ syncHistory(); try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+function loadHistory(){ try{ const s = localStorage.getItem(HKEY); const a = s ? JSON.parse(s) : []; return Array.isArray(a) ? a.filter(validGame) : []; }catch(e){ return []; } }
+function saveHistory(){ try{ localStorage.setItem(HKEY, JSON.stringify(history)); }catch(e){} }
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+function validGame(g){
+  return !!g && typeof g.id === "string" && Array.isArray(g.players) && g.players.length >= 2 && g.players.every(p => typeof p === "string")
+    && Array.isArray(g.holes) && g.holes.length >= 1 && g.holes.length <= HOLES && g.holes.every(h => Array.isArray(h) && h.length === g.players.length && h.every(Number.isInteger));
+}
+// Keep the archive in step with the current game after every change; undoing back to zero holes removes it.
+function syncHistory(){
+  if (state.phase !== "play" || !state.id) return;
+  const k = history.findIndex(g => g.id === state.id);
+  if (state.holes.length){
+    const g = { id:state.id, date: k >= 0 ? history[k].date : new Date().toISOString(), players:state.players.slice(), holes:state.holes.map(h => h.slice()), dealer0:state.dealer0 };
+    if (k >= 0) history[k] = g; else history.push(g);
+  } else if (k >= 0) history.splice(k, 1);
+  else return;
+  saveHistory();
+}
+
+// Players are matched across games by name: spacing and capitals don't matter. Unnamed "Player N" seats are left out of career stats.
+const pkey = n => String(n).trim().replace(/\s+/g," ").toLowerCase();
+const isGuest = n => /^player \d+$/.test(pkey(n));
+const gameTotals = g => g.players.map((_,i) => g.holes.reduce((s,h) => s + h[i], 0));
+const isDone = g => g.holes.length === HOLES;
+const byDate = () => history.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
+function fmtDate(iso){ const d = new Date(iso); return isNaN(d) ? "Unknown date" : d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}); }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const minus = n => n < 0 ? "−" + Math.abs(n) : String(n);
 function toParHtml(n){ return n === 0 ? `<span>E</span>` : n < 0 ? `<span class="under">−${-n}</span>` : `<span class="over">+${n}</span>`; }
@@ -193,12 +256,19 @@ function confirmThen(key, fn){
 function render(){
   const app = document.getElementById("app");
   const focusId = document.activeElement && document.activeElement.id;
-  app.innerHTML = state.phase === "setup" ? setupView() : playView();
+  app.innerHTML = view === "stats" ? statsView() : state.phase === "setup" ? setupView() : playView();
   if (focusId){ const el = document.getElementById(focusId); if (el) el.focus(); }
+  drawTrend(); keepAwake();
 }
 
 function header(extra=""){
-  return `<div class="brand"><div><h1>Card Golf</h1><div class="sub">9 holes · Par 36</div></div>${extra}</div>`;
+  return `<div class="brand"><div><h1>Card Golf</h1><div class="sub">9 holes · Par 36</div></div><div class="hdrbtns">${extra}</div></div>`;
+}
+const statsBtn = () => `<button class="small" data-act="stats" id="statsBtn">Stats</button>`;
+function knownNames(){ // for name suggestions, most-played first
+  const m = new Map();
+  byDate().forEach(g => g.players.forEach(n => { if (isGuest(n)) return; const k = pkey(n), r = m.get(k) || { n, c:0 }; r.n = n.trim(); r.c++; m.set(k, r); }));
+  return [...m.values()].sort((a,b) => b.c - a.c || a.n.localeCompare(b.n)).map(r => r.n);
 }
 
 function setupView(){
@@ -206,10 +276,12 @@ function setupView(){
   let names = "";
   for (let i=0;i<state.count;i++){
     names += `<div class="row"><span class="sub num" style="width:22px">${i+1}</span>
-      <input type="text" id="name-${i}" data-name="${i}" placeholder="Player ${i+1}" value="${esc(state.names[i]||"")}" maxlength="16" autocomplete="off"></div>`;
+      <input type="text" id="name-${i}" data-name="${i}" placeholder="Player ${i+1}" value="${esc(state.names[i]||"")}" maxlength="16" autocomplete="off" list="known-players"></div>`;
   }
+  const known = knownNames();
   const opts = Array.from({length:state.count},(_,i)=>`<option value="${i}" ${i===state.firstDealer?"selected":""}>${esc(pname(i))}</option>`).join("");
-  return header() + `
+  return header(statsBtn()) + `
+  <datalist id="known-players">${known.map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>
   <div class="panel">
     <div class="eyebrow">Players</div>
     <div class="stepper">
@@ -223,9 +295,11 @@ function setupView(){
       <label class="eyebrow" for="first-dealer">Deals the first hole</label>
       <select id="first-dealer">${opts}</select>
     </div>
+    ${setupError?`<div class="err">${esc(setupError)}</div>`:""}
     <button class="primary" data-act="start" id="start">Tee off</button>
   </div>
-  <p class="hint">Enter each player's total for the hole. Lowest total after 9 holes wins the green jacket.</p>`;
+  <p class="hint">Enter each player's total for the hole. Lowest total after 9 holes wins the green jacket.</p>
+  <p class="hint">Career stats are matched by name, so spell each player the same way every game${known.length?" (past players are suggested as you type)":""}. Capitals don't matter.</p>`;
 }
 
 function playView(){
@@ -245,7 +319,9 @@ function playView(){
       <h2>${names}</h2>
       <div class="num">Total ${minus(best)}</div>
       <div class="btnrow"><button data-act="rematch" id="rematch">Rematch, same players</button><button data-act="newsetup" id="newsetup2">New players</button></div>
-    </div>` + awardsView();
+      <div class="btnrow"><button data-act="shareResult" id="shareResult">Share results</button></div>
+      ${shareMsg?`<div class="hint" style="grid-column:1 / 3;color:var(--on-green)" role="status">${esc(shareMsg)}</div>`:""}
+    </div>` + (unbackedGames() >= 5 ? `<div class="nudge"><span class="grow">${plural(unbackedGames(),"finished game")} since your last backup.</span><button class="small" data-act="stats" id="nudgeStats">Back up</button></div>` : "") + awardsView();
   }
 
   const board = `<div class="board">
@@ -300,8 +376,8 @@ function playView(){
   }
 
   const reset = `<button class="small ghost" data-act="newgame" id="newgame">${confirmKey==="new"?"Tap to confirm":"New game"}</button>`;
-  return header(reset) + top + holeBlock + board + scorecard() + (done || !n ? "" : awardsView(true)) + tools +
-    `<p class="hint">Your game is kept on this device.</p>`;
+  return header(statsBtn() + reset) + top + holeBlock + board + scorecard() + (done || !n ? "" : awardsView(true)) + tools +
+    `<p class="hint">${done?"This game is saved to your history.":"This game is saved to your history as you go. If you stop early, resume it from Stats."}</p>`;
 }
 
 function markClass(v){
@@ -312,28 +388,31 @@ function markClass(v){
   if (d === 1) return "m-bogey";
   return "m-double";
 }
-function scorecard(){
-  const n = state.holes.length;
+function scTable(players, holes, editable){
+  const n = holes.length;
   const holeHeads = Array.from({length:HOLES},(_,h)=>`<th scope="col">${h+1}</th>`).join("");
   const parRow = Array.from({length:HOLES},()=>`<th>${PAR}</th>`).join("");
-  const t = totalsAfter(n);
-  const rows = state.players.map((p,i) => {
+  const t = players.map((_,i) => holes.reduce((s,h) => s + h[i], 0));
+  const rows = players.map((p,i) => {
     const cells = Array.from({length:HOLES},(_,h) => {
       if (h < n){
-        const v = state.holes[h][i];
-        return `<td><button class="cell" id="cell-${h}-${i}" data-act="editCell" data-h="${h}" data-i="${i}" aria-label="${esc(p)}, hole ${h+1}: ${v}. Tap to edit"><span class="mark ${markClass(v)}">${minus(v)}</span></button></td>`;
+        const v = holes[h][i], mark = `<span class="mark ${markClass(v)}">${minus(v)}</span>`;
+        return editable ? `<td><button class="cell" id="cell-${h}-${i}" data-act="editCell" data-h="${h}" data-i="${i}" aria-label="${esc(p)}, hole ${h+1}: ${v}. Tap to edit">${mark}</button></td>` : `<td>${mark}</td>`;
       }
       return `<td></td>`;
     }).join("");
     return `<tr><td class="name" title="${esc(p)}">${esc(p)}</td>${cells}<td class="tot">${n?minus(t[i]):""}</td><td class="tot tp">${n?toParHtml(t[i]-PAR*n):""}</td></tr>`;
   }).join("");
-  return `<div class="card">
-    <div class="cardhead"><h2 class="grow">Scorecard</h2><span class="hint">Tap any score to fix it</span></div>
-    <div class="tablewrap"><table class="sc">
+  return `<div class="tablewrap"><table class="sc">
       <thead><tr><th class="name" scope="col">Hole</th>${holeHeads}<th class="tot" scope="col">Tot</th><th class="tot tp" scope="col">Par</th></tr>
       <tr class="par"><th class="name">Par</th>${parRow}<th class="tot">${PAR*HOLES}</th><th class="tot tp"></th></tr></thead>
       <tbody>${rows}</tbody>
-    </table></div>
+    </table></div>`;
+}
+function scorecard(){
+  return `<div class="card">
+    <div class="cardhead"><h2 class="grow">Scorecard</h2><span class="hint">Tap any score to fix it</span></div>
+    ${scTable(state.players, state.holes, true)}
     <div class="legend">
       <span><span class="mark m-eagle">2</span>Eagle or better</span>
       <span><span class="mark m-birdie">3</span>Birdie</span>
@@ -358,7 +437,18 @@ function awardsView(live){
   const w = top(wins), u = top(unders);
   const pb = P.map((_,i)=>Math.min(...H.map(h=>h[i]))), pw = P.map((_,i)=>Math.max(...H.map(h=>h[i])));
   const tt = totalsAfter(H.length);
-  const table = `<div class="tablewrap"><table class="st"><thead><tr><th>Player</th><th>Won</th><th>Under par</th><th>Best</th><th>Worst</th><th>Avg</th></tr></thead><tbody>${P.map((p,i)=>`<tr><td>${esc(p)}</td><td>${wins[i]}</td><td>${unders[i]}</td><td>${minus(pb[i])}</td><td>${minus(pw[i])}</td><td>${(tt[i]/H.length).toFixed(1)}</td></tr>`).join("")}</tbody></table></div>`;
+  // holes spent leading, and each player's lowest position along the way
+  const led = P.map(()=>0), lowPos = P.map(()=>1);
+  for (let k=1; k<=H.length; k++){
+    const tk = totalsAfter(k), m = Math.min(...tk), rk = ranks(tk);
+    tk.forEach((v,i) => { if (v === m) led[i]++; lowPos[i] = Math.max(lowPos[i], rk[i].p); });
+  }
+  const nowPos = ranks(tt), cb = top(P.map((_,i) => lowPos[i] - nowPos[i].p));
+  const sd = P.map((_,i) => { const xs = H.map(h=>h[i]), m = xs.reduce((a,b)=>a+b,0)/xs.length; return Math.sqrt(xs.reduce((a,b)=>a+(b-m)**2,0)/xs.length); });
+  const sdMin = Math.min(...sd), steady = P.map((_,i)=>i).filter(i => sd[i] - sdMin < 1e-9);
+  const pars = P.map((_,i) => H.filter(h => h[i] === PAR).length), bogeys = P.map((_,i) => H.filter(h => h[i] > PAR).length);
+  const table = `<div class="tablewrap"><table class="st"><thead><tr><th>Player</th><th>Won</th><th>Led</th><th>Under</th><th>Par</th><th>Over</th><th>Best</th><th>Worst</th><th>Avg</th></tr></thead><tbody>${P.map((p,i)=>`<tr><td>${esc(p)}</td><td>${wins[i]}</td><td>${led[i]}</td><td>${unders[i]}</td><td>${pars[i]}</td><td>${bogeys[i]}</td><td>${minus(pb[i])}</td><td>${minus(pw[i])}</td><td>${(tt[i]/H.length).toFixed(1)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="hint">Won: lowest score on the hole, ties included. Led: holes finished in the lead. Under, Par, Over: holes scored below, at, or above par 4.</p>`;
   return `<div class="panel">
     <h2>${live?"Stats so far":"Awards"}</h2>
     <div class="awards">
@@ -366,9 +456,346 @@ function awardsView(live){
       <div class="award"><span class="an">Most holes won</span><span class="aw">${nameList(w.who)}</span><span class="ad num">${w.m} of ${H.length} holes, ties included</span></div>
       <div class="award"><span class="an">Birdie machine</span><span class="aw">${u.m?nameList(u.who):"Nobody"}</span><span class="ad num">${u.m} holes under par</span></div>
       <div class="award"><span class="an">Snowman</span><span class="aw">${nameList(worstList.map(x=>x[0]))}</span><span class="ad num">Worst hole: ${minus(worstV)} (${holeList(worstList)})</span></div>
+      <div class="award"><span class="an">Comeback</span><span class="aw">${cb.m>0?nameList(cb.who):"Nobody yet"}</span><span class="ad num">${cb.m>0?`Climbed ${cb.m} place${cb.m>1?"s":""} from their low point`:"No one has climbed the board"}</span></div>
+      <div class="award"><span class="an">Steady hand</span><span class="aw">${H.length>1?nameList(steady):"After hole 2"}</span><span class="ad num">${H.length>1?`Most consistent hole scores (±${sdMin.toFixed(1)})`:"Needs two holes"}</span></div>
     </div>
     ${table}
   </div>`;
+}
+
+function inRange(g){
+  if (range === "all") return true;
+  const d = new Date(g.date);
+  if (range[0] === "y") return d.getFullYear() === +range.slice(1);
+  return Date.now() - d <= +range.slice(1) * 864e5;
+}
+const rangeGames = () => byDate().filter(inRange);
+const rangeLabel = () => range === "all" ? "all time" : range[0] === "y" ? range.slice(1) : `the last ${range.slice(1)} days`;
+
+function careerStats(games){
+  const map = new Map();
+  games.filter(isDone).forEach(g => {
+    const t = gameTotals(g), rk = ranks(t), best = Math.min(...t), holeMin = g.holes.map(h => Math.min(...h));
+    g.players.forEach((name,i) => {
+      if (isGuest(name)) return;
+      const k = pkey(name);
+      let p = map.get(k);
+      if (!p){ p = { k, name:"", games:0, wins:0, shared:0, sum:0, pos:0, best:Infinity, worst:-Infinity, holes:0, holeWins:0, under:0, eagles:0, pars:0, blowups:0, bestHole:Infinity, streak:0, bestStreak:0, h2h:new Map(), log:[] }; map.set(k, p); }
+      p.name = name.trim(); // latest spelling wins
+      const won = t[i] === best;
+      p.games++; p.sum += t[i]; p.pos += rk[i].p;
+      p.best = Math.min(p.best, t[i]); p.worst = Math.max(p.worst, t[i]);
+      if (won){ p.wins++; if (rk[i].tied) p.shared++; p.streak++; p.bestStreak = Math.max(p.bestStreak, p.streak); } else p.streak = 0;
+      g.holes.forEach((h,hi) => {
+        const v = h[i]; p.holes++;
+        if (v === holeMin[hi]) p.holeWins++;
+        if (v < PAR) p.under++; if (v <= PAR - 2) p.eagles++; if (v === PAR) p.pars++; if (v >= BLOWUP) p.blowups++;
+        p.bestHole = Math.min(p.bestHole, v);
+      });
+      p.log.push({ g, total:t[i], pos:rk[i], won, field:g.players.length });
+      g.players.forEach((o,j) => {
+        const ok = pkey(o);
+        if (j === i || isGuest(o) || ok === k) return;
+        const r = p.h2h.get(ok) || { name:"", w:0, l:0, t:0 };
+        r.name = o.trim();
+        if (t[i] < t[j]) r.w++; else if (t[i] > t[j]) r.l++; else r.t++;
+        p.h2h.set(ok, r);
+      });
+    });
+  });
+  return [...map.values()].sort((a,b) => b.wins - a.wins || a.sum/a.games - b.sum/b.games || a.name.localeCompare(b.name));
+}
+const pct = (a,b) => b ? Math.round(100*a/b) + "%" : "–";
+const avg = (a,b) => b ? (a/b).toFixed(1) : "–";
+const plural = (n, w) => `${n} ${w}${n===1?"":"s"}`;
+const pLink = (k, name) => `<button class="link" data-act="player" data-k="${esc(k)}">${esc(name)}</button>`;
+const award = (t, w, d) => `<div class="award"><span class="an">${t}</span><span class="aw">${w}</span><span class="ad num">${d}</span></div>`;
+
+function rangeView(){
+  const years = [...new Set(history.map(g => new Date(g.date).getFullYear()).filter(y => !isNaN(y)))].sort((a,b) => b - a);
+  const opt = (v, l) => `<option value="${v}" ${range===v?"selected":""}>${l}</option>`;
+  return `<div class="row"><label class="eyebrow" for="range">Showing</label>
+    <select id="range" class="grow">${opt("all","All time")}${opt("d30","Last 30 days")}${opt("d90","Last 90 days")}${years.map(y => opt("y"+y, y)).join("")}</select></div>`;
+}
+function unbackedGames(){
+  let at = 0; try{ at = +localStorage.getItem(BKEY) || 0; }catch(e){}
+  return history.filter(isDone).length - at;
+}
+
+function statsView(){
+  const back = `<button class="small ghost" data-act="back" id="back">Back to game</button>`;
+  if (!history.length){
+    return header(back) + `<div class="panel"><h2>Stats &amp; history</h2><p class="empty">No games yet. Every game is saved here as you play.</p></div>` + backupView();
+  }
+  const games = rangeGames(), stats = careerStats(games), done = games.filter(isDone);
+  const sel = selPlayer && stats.find(p => p.k === selPlayer);
+  const nudge = unbackedGames() >= 5 ? `<div class="nudge"><span class="grow">${plural(unbackedGames(),"finished game")} since your last backup.</span><button class="small" data-act="export" id="nudgeExport">Back up now</button></div>` : "";
+  let body;
+  if (sel) body = playerView(sel);
+  else if (!done.length) body = `<div class="panel"><h2>Career stats</h2><p class="empty">No finished games in ${rangeLabel()}.</p></div>`;
+  else body = `
+  <div class="panel">
+    <div><h2>Career stats</h2><p class="hint">${plural(done.length,"finished game")} in ${rangeLabel()}. Tap a name for their record, trend and head-to-head.</p></div>
+    ${stats.length ? `<div class="tablewrap"><table class="st"><thead><tr><th>Player</th><th>GP</th><th>Wins</th><th>Win %</th><th>Avg</th><th>Best</th><th>Finish</th><th>Holes won</th><th>Under</th><th>${BLOWUP}+</th></tr></thead><tbody>
+      ${stats.map(p => `<tr><td>${pLink(p.k, p.name)}</td><td>${p.games}</td><td>${p.wins}</td><td>${pct(p.wins,p.games)}</td><td>${avg(p.sum,p.games)}</td><td>${minus(p.best)}</td><td>${avg(p.pos,p.games)}</td><td>${pct(p.holeWins,p.holes)}</td><td>${p.under}</td><td>${p.blowups}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="hint">GP: games played. Wins include shared wins. Avg: average 9-hole total. Finish: average finishing place. Holes won: share of holes with the lowest score. Under: holes under par. ${BLOWUP}+: blow-up holes scoring ${BLOWUP} or more.</p>`
+    : `<p class="empty">Only unnamed players so far. Name your players to track them.</p>`}
+  </div>
+  ${recordsView(done, stats)}`;
+  return header(back) + nudge + rangeView() + body + gameLogView(games, sel) + backupView() +
+    `<datalist id="known-players">${knownNames().map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>`;
+}
+
+function playerView(p){
+  const h2h = [...p.h2h.values()].sort((a,b) => (b.w+b.l+b.t) - (a.w+a.l+a.t) || a.name.localeCompare(b.name));
+  const recent = p.log.slice(-10).reverse();
+  const form = p.log.slice(-5).map(r => r.pos.p).join(" · ");
+  const renameForm = renaming ? `<div class="names">
+      <label class="eyebrow" for="rename">New name</label>
+      <input type="text" id="rename" value="${esc(renameVal)}" maxlength="16" autocomplete="off" list="known-players">
+      <p class="hint">Fixes the name in every saved game. Type another player's name to merge the two into one record.</p>
+      ${renameErr?`<div class="err">${esc(renameErr)}</div>`:""}
+      <div class="btnrow"><button class="primary" data-act="doRename" id="doRename">${confirmKey==="merge"?`Tap again to merge into ${esc(renameVal.trim())}`:"Save name"}</button><button data-act="cancelRename" id="cancelRename">Cancel</button></div>
+    </div>` : "";
+  const pts = p.log.map(r => ({ t:r.total, d:fmtDate(r.g.date), f:r.won ? (r.pos.tied ? "Shared win" : "Won") : `${posLabel(r.pos)} of ${r.field}` }));
+  return `<div class="panel">
+    <div class="row"><h2 class="grow">${esc(p.name)}</h2><button class="small ghost" data-act="allPlayers" id="allPlayers">All players</button></div>
+    ${renaming ? renameForm : `<div><button class="small" data-act="rename" id="renameBtn">Rename or merge</button></div>`}
+    <div class="awards">
+      ${award("Record", `${p.wins} win${p.wins===1?"":"s"} in ${p.games}`, `${pct(p.wins,p.games)} win rate${p.shared?` · ${p.shared} shared`:""}`)}
+      ${award("Average round", avg(p.sum,p.games), `${avg(p.sum,p.holes)} per hole · finishes ${avg(p.pos,p.games)} on average`)}
+      ${award("Best round", minus(p.best), `Worst: ${minus(p.worst)}`)}
+      ${award("Best hole", minus(p.bestHole), `${plural(p.eagles,"eagle")} or better, ${plural(p.under - p.eagles,"birdie")}`)}
+      ${award("Holes won", `${p.holeWins} of ${p.holes}`, `${pct(p.holeWins,p.holes)} · ${plural(p.pars,"par")}`)}
+      ${award("Win streak", `${p.streak} now`, `Longest: ${p.bestStreak}`)}
+      ${award("Blow-ups", p.blowups, p.blowups ? `Holes of ${BLOWUP}+ · 1 every ${Math.round(p.holes/p.blowups)} holes` : `No holes of ${BLOWUP} or more`)}
+      ${award("Recent form", form, "Finishing places, latest last")}
+    </div>
+    ${pts.length > 1 ? `<div><div class="eyebrow">Total by game</div><p class="hint">Each finished game in ${rangeLabel()}, oldest to newest. Lower is better; the gray line is par 36.</p>
+      <div class="chart" id="trend" tabindex="0" role="img" aria-label="${esc(p.name)}'s 9-hole totals over ${pts.length} games, from ${minus(pts[0].t)} to ${minus(pts[pts.length-1].t)}" data-pts="${esc(JSON.stringify(pts))}"></div></div>` : ""}
+    ${h2h.length ? `<div><div class="eyebrow">Head to head</div>
+      <div class="tablewrap"><table class="st"><thead><tr><th>Against</th><th>Games</th><th>Won</th><th>Lost</th><th>Tied</th><th>Win %</th></tr></thead><tbody>
+      ${h2h.map(r => { const n = r.w + r.l + r.t; return `<tr><td>${pLink(pkey(r.name), r.name)}</td><td>${n}</td><td>${r.w}</td><td>${r.l}</td><td>${r.t}</td><td>${pct(r.w,n)}</td></tr>`; }).join("")}
+      </tbody></table></div>
+      <p class="hint">Won means ${esc(p.name)} finished with a lower total than that player in the same game.</p></div>` : ""}
+    <div><div class="eyebrow">Last ${recent.length} game${recent.length>1?"s":""}</div>
+      <div class="tablewrap"><table class="st"><thead><tr><th>Date</th><th>Total</th><th>To par</th><th>Finish</th></tr></thead><tbody>
+      ${recent.map(r => `<tr><td>${fmtDate(r.g.date)}</td><td>${minus(r.total)}</td><td>${toParHtml(r.total - PAR*HOLES)}</td><td>${r.won?"<b>Won</b>":posLabel(r.pos)+" of "+r.field}${r.won&&r.pos.tied?" (shared)":""}</td></tr>`).join("")}
+      </tbody></table></div></div>
+  </div>`;
+}
+
+function recordsView(games, stats){
+  const rounds = [], holes = [], margins = [];
+  games.forEach(g => {
+    const t = gameTotals(g);
+    g.players.forEach((n,i) => { if (!isGuest(n)) rounds.push({ n:n.trim(), v:t[i], g }); });
+    g.holes.forEach((h,hi) => h.forEach((v,i) => { if (!isGuest(g.players[i])) holes.push({ n:g.players[i].trim(), v, g, hi }); }));
+    const s = t.slice().sort((a,b) => a - b), w = t.indexOf(s[0]);
+    if (s[1] > s[0] && !isGuest(g.players[w])) margins.push({ n:g.players[w].trim(), v:s[1] - s[0], g });
+  });
+  if (!rounds.length) return "";
+  const pick = (list, fn) => { const m = fn(...list.map(x => x.v)); return { m, who:list.filter(x => x.v === m) }; };
+  const names = who => esc([...new Set(who.map(x => x.n))].slice(0,3).join(", ")) + (new Set(who.map(x => x.n)).size > 3 ? "…" : "");
+  const when = who => who.length === 1 ? fmtDate(who[0].g.date) : `${who.length} times`;
+  const lo = pick(rounds, Math.min), hi = pick(rounds, Math.max), bh = pick(holes, Math.min);
+  const mg = margins.length ? pick(margins, Math.max) : null;
+  const most = f => stats.length ? Math.max(...stats.map(p => p[f])) : 0;
+  const whoOf = (m, f) => esc(stats.filter(p => p[f] === m).map(p => p.name).slice(0,3).join(", "));
+  const mostW = most("wins"), longS = most("bestStreak"), mostB = most("blowups"), mostG = most("games");
+  return `<div class="panel">
+    <h2>Records</h2>
+    <div class="awards">
+      ${award("Lowest round", names(lo.who), `${minus(lo.m)} · ${when(lo.who)}`)}
+      ${award("Highest round", names(hi.who), `${minus(hi.m)} · ${when(hi.who)}`)}
+      ${award("Best hole ever", names(bh.who), `${minus(bh.m)} · ${bh.who.length === 1 ? `hole ${bh.who[0].hi+1}, ${fmtDate(bh.who[0].g.date)}` : `${bh.who.length} times`}`)}
+      ${award("Biggest win", mg ? names(mg.who) : "–", mg ? `By ${mg.m} · ${when(mg.who)}` : "No outright wins yet")}
+      ${award("Most wins", mostW ? whoOf(mostW, "wins") : "–", plural(mostW, "win"))}
+      ${award("Longest win streak", longS ? whoOf(longS, "bestStreak") : "–", `${longS} in a row`)}
+      ${award("Most blow-ups", mostB ? whoOf(mostB, "blowups") : "Nobody", mostB ? `${plural(mostB,"hole")} of ${BLOWUP}+` : `No holes of ${BLOWUP}+ yet`)}
+      ${award("Most games", mostG ? whoOf(mostG, "games") : "–", plural(mostG, "game"))}
+    </div>
+  </div>`;
+}
+
+function gameLogView(all, sel){
+  let games = all.slice().reverse();
+  if (sel) games = games.filter(g => g.players.some(n => pkey(n) === sel.k));
+  if (!games.length) return "";
+  const shown = showAllGames ? games : games.slice(0, 10);
+  const items = shown.map(g => {
+    const t = gameTotals(g), best = Math.min(...t);
+    const order = t.map((_,i) => i).sort((a,b) => t[a] - t[b] || a - b);
+    const lead = order.filter(i => t[i] === best), leadNames = lead.map(i => esc(g.players[i])).join(" &amp; ");
+    const current = g.id === state.id && state.phase === "play" && !over();
+    const status = isDone(g) ? `${leadNames} ${lead.length>1?"tied":"won"}`
+      : `<span class="tag">${current?"In progress":"Unfinished"}</span> Thru ${g.holes.length} · ${leadNames} ${lead.length>1?"tied for the lead":"leading"}`;
+    const open = openGame === g.id, del = "dg-" + g.id;
+    return `<div class="gitem">
+      <div class="gmeta"><b>${fmtDate(g.date)}</b><span class="hint">${status}</span></div>
+      <div class="gscores num">${order.map(i => `${esc(g.players[i])} <b>${minus(t[i])}</b>`).join(" · ")}</div>
+      <div class="btnrow">
+        ${!isDone(g) && !current ? `<button class="small" data-act="resume" data-id="${esc(g.id)}" id="rs-${esc(g.id)}">Resume</button>` : ""}
+        <button class="small" data-act="viewGame" data-id="${esc(g.id)}" id="vg-${esc(g.id)}">${open?"Hide scorecard":"Scorecard"}</button>
+        ${current ? "" : `<button class="small danger" data-act="delGame" data-id="${esc(g.id)}" id="${esc(del)}">${confirmKey===del?"Tap to delete":"Delete"}</button>`}</div>
+      ${open ? `<div class="card">${scTable(g.players, g.holes, false)}</div>` : ""}
+    </div>`;
+  }).join("");
+  return `<div class="panel">
+    <h2>${sel ? `${esc(sel.name)}'s games` : "Game log"}</h2>
+    <div>${items}</div>
+    ${games.length > 10 ? `<button class="small" data-act="allGames" id="allGames">${showAllGames?"Show fewer":`Show all ${games.length} games`}</button>` : ""}
+  </div>`;
+}
+
+function backupView(){
+  return `<div class="panel">
+    <h2>Backup &amp; share</h2>
+    <p class="hint">History is stored on this phone only. Clearing site data or switching phones loses it, so back it up now and then.</p>
+    <p class="hint">To combine two phones' history, share the backup to the other phone and tap Restore there. Games it already has are skipped, so you can go both ways without doubling anything.</p>
+    <div class="btnrow"><button data-act="share" id="shareBackup" ${history.length?"":"disabled"}>Share backup</button><button data-act="export" id="export" ${history.length?"":"disabled"}>Download</button><button data-act="import" id="importBtn">Restore</button></div>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+    ${histMsg ? `<p class="hint" role="status">${esc(histMsg)}</p>` : ""}
+  </div>`;
+}
+
+function backupFile(){
+  const data = JSON.stringify({ app:"card-golf", version:1, exported:new Date().toISOString(), games:history }, null, 2);
+  return new File([data], `card-golf-history-${new Date().toISOString().slice(0,10)}.json`, { type:"application/json" });
+}
+function markBackedUp(){ try{ localStorage.setItem(BKEY, String(history.filter(isDone).length)); }catch(e){} }
+function exportHistory(){
+  const f = backupFile(), a = document.createElement("a");
+  a.href = URL.createObjectURL(f); a.download = f.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  markBackedUp(); histMsg = `Downloaded ${f.name}.`;
+}
+async function shareHistory(){
+  const f = backupFile();
+  if (navigator.canShare && navigator.canShare({ files:[f] })){
+    try{ await navigator.share({ files:[f], title:"Card Golf history" }); markBackedUp(); histMsg = "Backup shared."; }
+    catch(e){ if (e.name !== "AbortError") histMsg = "Couldn't share. Try Download instead."; }
+  } else { exportHistory(); histMsg += " This browser can't share files, so it was downloaded instead."; }
+}
+function importHistory(text){
+  let data;
+  try{ data = JSON.parse(text); }catch(e){ histMsg = "That file isn't a Card Golf backup."; return; }
+  const games = Array.isArray(data) ? data : data && Array.isArray(data.games) ? data.games : null;
+  if (!games){ histMsg = "That file isn't a Card Golf backup."; return; }
+  let added = 0, updated = 0, skipped = 0, bad = 0;
+  games.forEach(g => {
+    if (!validGame(g)){ bad++; return; }
+    const k = history.findIndex(x => x.id === g.id);
+    const copy = { id:g.id, date: isNaN(new Date(g.date)) ? new Date().toISOString() : g.date, players:g.players.slice(), holes:g.holes.map(h => h.slice()), dealer0:g.dealer0|0 };
+    if (k < 0){ history.push(copy); added++; }
+    else if (g.holes.length > history[k].holes.length && g.id !== state.id){ history[k] = copy; updated++; } // the other phone got further in this game
+    else skipped++;
+  });
+  saveHistory();
+  histMsg = `Added ${plural(added,"game")}.` + (updated ? ` Updated ${updated} unfinished.` : "") + (skipped ? ` ${skipped} already here.` : "") + (bad ? ` ${bad} unreadable.` : "");
+}
+
+// Rename a player in every saved game (and the current one). Renaming onto another player's name merges them.
+function renamePlayer(from, to){
+  const tk = pkey(to), fix = n => (pkey(n) === from || pkey(n) === tk) ? to : n;
+  history.forEach(g => { g.players = g.players.map(fix); });
+  saveHistory();
+  state.players = state.players.map(fix);
+  state.names = state.names.map(n => n && (pkey(n) === from || pkey(n) === tk) ? to : n);
+  save();
+}
+function tryRename(){
+  const to = renameVal.trim().replace(/\s+/g, " "), from = selPlayer, tk = pkey(to);
+  renameErr = "";
+  if (!to) renameErr = "Enter a name.";
+  else if (isGuest(to)) renameErr = "Pick a real name, not Player 1, Player 2 and so on.";
+  else if (tk !== from){
+    const both = g => g.players.some(n => pkey(n) === from) && g.players.some(n => pkey(n) === tk);
+    const clash = history.find(both) || (state.phase === "play" && both(state));
+    if (clash) renameErr = `Can't merge: both played in the same game${clash.date ? " on " + fmtDate(clash.date) : ""}.`;
+  }
+  if (renameErr){ render(); return; }
+  const merging = tk !== from && history.some(g => g.players.some(n => pkey(n) === tk));
+  const apply = () => { renamePlayer(from, to); selPlayer = tk; renaming = false; render(); };
+  if (merging) confirmThen("merge", apply); else apply();
+}
+
+function niceStep(r){ const p = 10 ** Math.floor(Math.log10(r)), f = r / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
+// Line chart of a player's totals; drawn after render so it can size to its container.
+function drawTrend(){
+  const el = document.getElementById("trend"); if (!el) return;
+  const pts = JSON.parse(el.dataset.pts), W = el.clientWidth, H = 190, m = { l:34, r:40, t:14, b:26 };
+  const parT = PAR * HOLES, vals = pts.map(p => p.t).concat(parT);
+  const step = niceStep((Math.max(...vals) - Math.min(...vals)) / 4 || 1);
+  const lo = Math.floor(Math.min(...vals) / step) * step, hi = Math.max(Math.ceil(Math.max(...vals) / step) * step, lo + step);
+  const x = i => m.l + i * (W - m.l - m.r) / (pts.length - 1), y = v => m.t + (hi - v) * (H - m.t - m.b) / (hi - lo);
+  const ns = "http://www.w3.org/2000/svg", mk = (tag, a) => { const e = document.createElementNS(ns, tag); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const svg = mk("svg", { width:W, height:H, "aria-hidden":"true" });
+  for (let v = lo; v <= hi + 1e-9; v += step){
+    svg.appendChild(mk("line", { x1:m.l, x2:W - m.r, y1:y(v), y2:y(v), class:"grid" }));
+    const t = mk("text", { x:m.l - 6, y:y(v) + 4, "text-anchor":"end", class:"tick" }); t.textContent = minus(v); svg.appendChild(t);
+  }
+  svg.appendChild(mk("line", { x1:m.l, x2:W - m.r, y1:y(parT), y2:y(parT), class:"ref" }));
+  const pl = mk("text", { x:m.l + 4, y:y(parT) - 5, class:"tick" }); pl.textContent = "Par 36"; svg.appendChild(pl);
+  [[0, "start"], [pts.length - 1, "end"]].forEach(([i, anchor]) => { const t = mk("text", { x:x(i), y:H - 6, "text-anchor":anchor, class:"tick" }); t.textContent = pts[i].d; svg.appendChild(t); });
+  const cross = mk("line", { y1:m.t, y2:H - m.b, class:"cross", visibility:"hidden" }); svg.appendChild(cross);
+  svg.appendChild(mk("path", { d:pts.map((p,i) => `${i?"L":"M"}${x(i)},${y(p.t)}`).join(""), class:"series" }));
+  if (pts.length <= 30) pts.forEach((p,i) => svg.appendChild(mk("circle", { cx:x(i), cy:y(p.t), r:4, class:"dot" })));
+  const last = pts.length - 1;
+  svg.appendChild(mk("circle", { cx:x(last), cy:y(pts[last].t), r:4, class:"dot" }));
+  const el2 = mk("text", { x:x(last) + 8, y:y(pts[last].t) + 4, class:"endlabel" }); el2.textContent = minus(pts[last].t); svg.appendChild(el2);
+  const hot = mk("circle", { r:5, class:"dot hot", visibility:"hidden" }); svg.appendChild(hot);
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true;
+  el.replaceChildren(svg, tip);
+  let cur = -1;
+  const show = i => {
+    cur = i; const cx = x(i), cy = y(pts[i].t);
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
+    hot.setAttribute("cx", cx); hot.setAttribute("cy", cy); hot.setAttribute("visibility", "visible");
+    const b = document.createElement("b"); b.textContent = minus(pts[i].t) + " ";
+    const s = document.createElement("span"); s.textContent = `${pts[i].f} · ${pts[i].d}`;
+    tip.replaceChildren(b, s); tip.hidden = false;
+    tip.style.left = Math.min(Math.max(cx - tip.offsetWidth / 2, 0), W - tip.offsetWidth) + "px";
+    tip.style.top = Math.max(cy - tip.offsetHeight - 12, 0) + "px";
+  };
+  const hide = () => { cur = -1; tip.hidden = true; cross.setAttribute("visibility", "hidden"); hot.setAttribute("visibility", "hidden"); };
+  svg.addEventListener("pointermove", e => { const r = svg.getBoundingClientRect(); show(Math.max(0, Math.min(last, Math.round((e.clientX - r.left - m.l) / ((W - m.l - m.r) / last))))); });
+  svg.addEventListener("pointerleave", hide);
+  el.onkeydown = e => { if (e.key === "ArrowRight" || e.key === "ArrowLeft"){ e.preventDefault(); show(Math.max(0, Math.min(last, (cur < 0 ? last : cur) + (e.key === "ArrowRight" ? 1 : -1)))); } };
+  el.onblur = hide;
+}
+let lastW = innerWidth; // phones fire resize when the address bar hides; only redraw on real width changes
+window.addEventListener("resize", () => { if (innerWidth !== lastW){ lastW = innerWidth; drawTrend(); } });
+
+// Keep the screen on while a game is being played.
+let wakeLock = null, wakePending = false;
+async function keepAwake(){
+  const want = view === "game" && state.phase === "play" && !over() && document.visibilityState === "visible";
+  try{
+    if (want && !wakeLock && !wakePending && navigator.wakeLock){
+      wakePending = true;
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } else if (!want && wakeLock){ const w = wakeLock; wakeLock = null; await w.release(); }
+  }catch(e){}
+  wakePending = false;
+}
+document.addEventListener("visibilitychange", keepAwake);
+
+function resultText(){
+  const t = totalsAfter(state.holes.length), rk = ranks(t);
+  const order = t.map((_,i) => i).sort((a,b) => t[a] - t[b] || a - b);
+  return `Card Golf · ${fmtDate(new Date().toISOString())}\n` + order.map(i => `${rk[i].p === 1 ? "🏆" : posLabel(rk[i]) + "."} ${state.players[i]} ${minus(t[i])} (${t[i] - PAR*HOLES === 0 ? "E" : (t[i] - PAR*HOLES > 0 ? "+" : "−") + Math.abs(t[i] - PAR*HOLES)})`).join("\n");
+}
+async function shareResult(){
+  const text = resultText();
+  try{
+    if (navigator.share){ await navigator.share({ text }); shareMsg = ""; }
+    else { await navigator.clipboard.writeText(text); shareMsg = "Copied. Paste it into your group chat."; }
+  }catch(e){ if (e.name !== "AbortError") shareMsg = "Couldn't share on this browser."; }
+  render();
 }
 
 function jacketSvg(){
@@ -411,9 +838,14 @@ document.addEventListener("click", e => {
   const act = b.dataset.act, i = b.dataset.i != null ? +b.dataset.i : null;
   switch(act){
     case "count": state.count = Math.min(7, Math.max(2, state.count + +b.dataset.d)); save(); render(); break;
-    case "start":
-      state.players = Array.from({length:state.count},(_,k)=>pname(k));
+    case "start": {
+      const names = Array.from({length:state.count},(_,k)=>pname(k));
+      const dup = names.find((n,k) => names.findIndex(m => pkey(m) === pkey(n)) !== k);
+      if (dup){ setupError = `Two players are named ${dup}. Add an initial so their stats stay separate.`; render(); break; }
+      setupError = "";
+      state.players = names; state.id = newId();
       state.dealer0 = state.firstDealer; state.holes = []; state.phase = "play"; entry = null; save(); render(); break;
+    }
     case "newHole": openEntry(null); break;
     case "editCell": openEntry(+b.dataset.h, i); break;
     case "cancel": entry = null; render(); break;
@@ -433,9 +865,37 @@ document.addEventListener("click", e => {
     }
     case "delHole": confirmThen("del", ()=>{ state.holes.splice(entry.editing,1); entry = null; save(); render(); }); break;
     case "undo": confirmThen("undo", ()=>{ state.holes.pop(); entry = null; save(); render(); }); break;
-    case "rematch": state.holes = []; state.dealer0 = (state.dealer0 + HOLES) % state.players.length; entry = null; save(); render(); break;
+    case "rematch": shareMsg = ""; state.holes = []; state.id = newId(); state.dealer0 = (state.dealer0 + HOLES) % state.players.length; entry = null; save(); render(); break;
     case "newsetup": state.phase = "setup"; state.holes = []; entry = null; save(); render(); break;
     case "newgame": confirmThen("new", ()=>{ state.phase = "setup"; state.holes = []; entry = null; save(); render(); }); break;
+    case "stats": view = "stats"; selPlayer = null; openGame = null; histMsg = ""; renaming = false; render(); window.scrollTo({top:0}); break;
+    case "back": view = "game"; render(); window.scrollTo({top:0}); break;
+    case "player": selPlayer = b.dataset.k; openGame = null; showAllGames = false; renaming = false; render(); window.scrollTo({top:0}); break;
+    case "allPlayers": selPlayer = null; renaming = false; openGame = null; showAllGames = false; render(); window.scrollTo({top:0}); break;
+    case "viewGame": openGame = openGame === b.dataset.id ? null : b.dataset.id; render(); break;
+    case "allGames": showAllGames = !showAllGames; render(); break;
+    case "delGame": {
+      const id = b.dataset.id;
+      confirmThen("dg-" + id, ()=>{
+        history = history.filter(g => g.id !== id); saveHistory();
+        if (state.id === id) state.id = null; // don't re-archive it on the next edit
+        save(); render();
+      });
+      break;
+    }
+    case "export": exportHistory(); render(); break;
+    case "share": shareHistory().then(render); break;
+    case "shareResult": shareResult(); break;
+    case "rename": renaming = true; renameErr = ""; renameVal = (careerStats(rangeGames()).find(p => p.k === selPlayer) || {}).name || ""; render();
+      { const f = document.getElementById("rename"); if (f){ f.focus(); f.select(); } } break;
+    case "cancelRename": renaming = false; render(); break;
+    case "doRename": tryRename(); break;
+    case "resume": {
+      const g = history.find(x => x.id === b.dataset.id); if (!g) break;
+      Object.assign(state, { phase:"play", id:g.id, players:g.players.slice(), holes:g.holes.map(h => h.slice()), dealer0:g.dealer0|0, count:g.players.length });
+      entry = null; view = "game"; shareMsg = ""; save(); render(); window.scrollTo({top:0}); break;
+    }
+    case "import": document.getElementById("importFile").click(); break;
   }
 });
 
@@ -443,8 +903,13 @@ document.addEventListener("input", e => {
   const t = e.target;
   if (t.dataset.name != null){
     state.names[+t.dataset.name] = t.value; save();
+    if (setupError){ setupError = ""; const err = document.querySelector(".err"); if (err) err.remove(); }
     const sel = document.getElementById("first-dealer");
     if (sel && sel.options[+t.dataset.name]) sel.options[+t.dataset.name].textContent = pname(+t.dataset.name);
+  }
+  if (t.id === "rename"){
+    renameVal = t.value;
+    if (confirmKey === "merge"){ confirmKey = null; clearTimeout(confirmTimer); const b = document.getElementById("doRename"); if (b) b.textContent = "Save name"; }
   }
   if (t.dataset.score != null && entry){
     const i = +t.dataset.score;
@@ -455,8 +920,15 @@ document.addEventListener("input", e => {
     const err = document.querySelector(".err"); if (err) err.remove();
   }
 });
-document.addEventListener("change", e => { if (e.target.id === "first-dealer"){ state.firstDealer = +e.target.value; save(); } });
+document.addEventListener("change", e => {
+  if (e.target.id === "first-dealer"){ state.firstDealer = +e.target.value; save(); }
+  if (e.target.id === "range"){ range = e.target.value; openGame = null; showAllGames = false; render(); }
+  if (e.target.id === "importFile" && e.target.files[0]){
+    e.target.files[0].text().then(importHistory, () => { histMsg = "Couldn't read that file."; }).then(render);
+  }
+});
 document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.id === "rename"){ e.preventDefault(); tryRename(); return; }
   if (e.key === "Enter" && e.target.dataset.score != null){
     e.preventDefault();
     const nx = document.getElementById("score-" + (+e.target.dataset.score + 1));
@@ -464,6 +936,8 @@ document.addEventListener("keydown", e => {
   }
 });
 
+// Games started before history existed get an id, so a finished one is archived right away.
+if (state.phase === "play" && !state.id){ state.id = newId(); save(); }
 render();
 </script>
 </body>
