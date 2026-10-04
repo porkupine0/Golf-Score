@@ -102,6 +102,7 @@ input[type=text],select{font:inherit;width:100%;padding:10px 12px;border-radius:
 .cardhead{padding:12px 16px;display:flex;align-items:baseline;gap:10px;border-bottom:3px double var(--green)}
 .cardhead h2{color:var(--green)}
 .tablewrap{overflow-x:auto}
+.paste{font:inherit;font-size:16px;width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);resize:vertical}
 table.sc{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-family:"Barlow Condensed",sans-serif;font-size:18px}
 .sc th,.sc td{padding:0;text-align:center;border:1px solid var(--line);min-width:38px;height:42px}
 .sc thead th{background:var(--green);color:var(--on-green);font-weight:700;letter-spacing:.06em;border-color:var(--green-deep)}
@@ -525,7 +526,7 @@ function unbackedGames(){
 function statsView(){
   const back = `<button class="small ghost" data-act="back" id="back">Back to game</button>`;
   if (!history.length){
-    return header(back) + `<div class="panel"><h2>Stats &amp; history</h2><p class="empty">No games yet. Every game is saved here as you play.</p></div>` + backupView();
+    return header(back) + `<div class="panel"><h2>Stats &amp; history</h2><p class="empty">No games yet. Every game is saved here as you play.</p></div>` + moveView() + backupView();
   }
   const games = rangeGames(), stats = careerStats(games), done = games.filter(isDone);
   const sel = selPlayer && stats.find(p => p.k === selPlayer);
@@ -543,7 +544,7 @@ function statsView(){
     : `<p class="empty">Only unnamed players so far. Name your players to track them.</p>`}
   </div>
   ${recordsView(done, stats)}`;
-  return header(back) + nudge + rangeView() + body + gameLogView(games, sel) + backupView() +
+  return header(back) + nudge + rangeView() + body + gameLogView(games, sel) + backupView() + moveView() +
     `<datalist id="known-players">${knownNames().map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>`;
 }
 
@@ -682,6 +683,7 @@ async function shareHistory(){
 function importHistory(text){
   let data;
   try{ data = JSON.parse(text); }catch(e){ histMsg = "That file isn't a Card Golf backup."; return; }
+  if (data && data.kind === BUNDLE && data.apps) data = Array.isArray(data.apps["card-golf"]) ? data.apps["card-golf"] : [];
   const games = Array.isArray(data) ? data : data && Array.isArray(data.games) ? data.games : null;
   if (!games){ histMsg = "That file isn't a Card Golf backup."; return; }
   let added = 0, updated = 0, skipped = 0, bad = 0;
@@ -695,6 +697,70 @@ function importHistory(text){
   });
   saveHistory();
   histMsg = `Added ${plural(added,"game")}.` + (updated ? ` Updated ${updated} unfinished.` : "") + (skipped ? ` ${skipped} already here.` : "") + (bad ? ` ${bad} unreadable.` : "");
+}
+
+// Moving History into a Home Screen icon. On iPhone an app opened from a Home Screen icon keeps its own storage,
+// separate from Safari. All the card apps share Safari's storage, so one Copy there carries every card game's
+// history; Paste in the icon takes Card Golf's part.
+const BUNDLE = "card-games-history";
+const CARD_APPS = ["hand-foot","hearts","skyjo","cribbage","spades","euchre","pitch","casino","flip7","up-down-river","presidents","mao","card-golf"];
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const standalone = () => navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+let moveMsg = "", pasteBox = false;
+function cardBundle(){
+  const apps = {}; let n = 0, k = 0;
+  CARD_APPS.forEach(id => {
+    let a = [];
+    try{ a = JSON.parse(localStorage.getItem(id + "-history-v1") || "[]"); }catch(e){ a = []; }
+    if (Array.isArray(a) && a.length){ apps[id] = a; n += a.length; k++; }
+  });
+  return { text: JSON.stringify({ kind:BUNDLE, version:1, exported:new Date().toISOString(), apps }), games:n, apps:k };
+}
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); return true; }catch(e){ /* older browsers: copy from a hidden box */ }
+  const t = document.createElement("textarea");
+  t.value = text; t.setAttribute("readonly",""); t.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(t); t.select(); t.setSelectionRange(0, text.length);
+  let ok = false;
+  try{ ok = document.execCommand("copy"); }catch(e){ ok = false; }
+  t.remove();
+  return ok;
+}
+async function copyAll(){
+  const b = cardBundle();
+  if (!b.games){ moveMsg = "No card games are saved in Safari yet."; return; }
+  moveMsg = await copyText(b.text)
+    ? `Copied ${plural(b.games,"game")} from ${plural(b.apps,"card app")}. Now open the Home Screen icon, tap Stats, then Paste from Safari.`
+    : "Couldn't copy on this browser. Use Share backup instead, then Restore in the icon.";
+}
+async function pasteFromSafari(){
+  let text = "";
+  try{ text = await navigator.clipboard.readText(); }catch(e){ text = ""; }
+  if (!text){ pasteBox = true; moveMsg = "Long-press the box, tap Paste, then tap Add games."; return; }
+  takePaste(text);
+}
+function takePaste(text){
+  let data = null;
+  try{ data = JSON.parse(text); }catch(e){ data = null; }
+  const ours = data && data.kind === BUNDLE && data.apps && typeof data.apps === "object";
+  if (ours && !(Array.isArray(data.apps["card-golf"]) && data.apps["card-golf"].length)){ pasteBox = false; moveMsg = "What you copied has no Card Golf games."; return; }
+  if (ours || (data && (Array.isArray(data) || (data.app === "card-golf" && Array.isArray(data.games))))){
+    importHistory(text); pasteBox = false;
+    moveMsg = ours ? histMsg.replace(/^Added/, "From Safari: added") : histMsg; histMsg = "";
+    return;
+  }
+  moveMsg = "That isn't card game history. In Safari, open Stats and tap Copy for Home Screen first.";
+}
+function moveView(){
+  if (!isIOS) return "";
+  const msg = moveMsg ? `<p class="hint" role="status">${esc(moveMsg)}</p>` : "";
+  if (!standalone()) return `<div class="panel"><h2>Home Screen icon</h2>
+    <p class="hint">An app opened from a Home Screen icon keeps its own history, separate from Safari. To bring your games over, tap Copy here, then open the icon, tap Stats and tap Paste from Safari. One Copy carries every card game's history.</p>
+    <div class="btnrow"><button data-act="moveCopy" id="moveCopy">Copy for Home Screen</button></div>${msg}</div>`;
+  return `<div class="panel"><h2>Games from Safari</h2>
+    <p class="hint">This Home Screen icon keeps its own history, separate from Safari. If you played in Safari before, open ${esc((location.host + location.pathname).replace(/index\.html$/,""))} in Safari, tap Stats, then Copy for Home Screen. Then come back here and tap Paste from Safari.</p>
+    <div class="btnrow"><button data-act="movePaste" id="movePaste">Paste from Safari</button></div>
+    ${pasteBox ? `<textarea id="moveText" class="paste" rows="3" placeholder="Long-press here and tap Paste" aria-label="Copied history"></textarea><div class="btnrow"><button data-act="movePaste2" id="movePaste2">Add games</button></div>` : ""}${msg}</div>`;
 }
 
 // Rename a player in every saved game (and the current one). Renaming onto another player's name merges them.
@@ -896,6 +962,9 @@ document.addEventListener("click", e => {
       entry = null; view = "game"; shareMsg = ""; save(); render(); window.scrollTo({top:0}); break;
     }
     case "import": document.getElementById("importFile").click(); break;
+    case "moveCopy": copyAll().then(render); break;
+    case "movePaste": pasteFromSafari().then(render); break;
+    case "movePaste2": { const t = document.getElementById("moveText"); takePaste(t ? t.value : ""); render(); break; }
   }
 });
 
@@ -947,5 +1016,18 @@ if ("serviceWorker" in navigator && window.isSecureContext && location.protocol.
 try { if (navigator.storage && navigator.storage.persist && !localStorage.getItem("cards-golf-persist")) { localStorage.setItem("cards-golf-persist", "1"); navigator.storage.persist(); } } catch (e) {}
 </script>
 <!-- offline:end -->
+<!-- cardnight:start -->
+<script>
+// Opened from Card Night (one Home Screen icon for every card game): a link back to the game list.
+(function(){
+  try{ if (sessionStorage.getItem("card-night") !== "1") return; }catch(e){ return; }
+  var app = document.getElementById("app"), st = document.createElement("style"), bar = document.createElement("div");
+  st.textContent = ".cn-bar{margin:10px auto 6px}.cn-back{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 14px;border-radius:999px;border:1px solid var(--line,rgba(128,128,128,.4));background:var(--surface,transparent);color:var(--ink,inherit);font-family:inherit;font-size:14px;font-weight:700;line-height:1.2;text-decoration:none}";
+  document.head.appendChild(st);
+  bar.className = "cn-bar"; bar.innerHTML = '<a class="cn-back" href="/card-night/" id="cn-back"><span aria-hidden="true">‹</span> All games</a>';
+  if (app){ bar.style.maxWidth = getComputedStyle(app).maxWidth; app.parentNode.insertBefore(bar, app); } else document.body.insertBefore(bar, document.body.firstChild);
+})();
+</script>
+<!-- cardnight:end -->
 </body>
 </html>
